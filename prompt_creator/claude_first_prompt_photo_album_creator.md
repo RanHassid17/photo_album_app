@@ -34,7 +34,7 @@ You must follow the attached specification document as the source of truth.
 # Important Constraints
 
 - The frontend must be React + TypeScript
-- Backend can use Node.js and/or Python where appropriate
+- Backend can use Node.js and/or Python where appropriate (I prefer python)
 - Claude Sonnet 4.6 is the primary reasoning/orchestration model
 - UX must be extremely simple for non-technical users
 - Hebrew RTL support is required
