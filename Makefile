@@ -45,7 +45,8 @@ frontend:
 	cd frontend && npm run dev
 
 worker:
-	cd backend && . .venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+	cd backend && . .venv/bin/activate && OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES \
+	  celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
 
 dev:
 	@$(MAKE) -j2 backend frontend

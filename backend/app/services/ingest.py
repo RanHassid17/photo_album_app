@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ class IngestResult:
     inserted: int
     duplicates: int
     errors: int
+    inserted_ids: list[uuid.UUID]
 
 
 def _sha256_of_file(path: Path) -> str:
@@ -51,7 +53,9 @@ def run_ingest(job_id: uuid.UUID, source: PhotoSource) -> IngestResult:
     storage_root.mkdir(parents=True, exist_ok=True)
 
     total = source.estimated_count() or 0
-    result = IngestResult(scanned=0, inserted=0, duplicates=0, errors=0)
+    result = IngestResult(
+        scanned=0, inserted=0, duplicates=0, errors=0, inserted_ids=[]
+    )
 
     db: Session = SessionLocal()
     try:
@@ -97,6 +101,7 @@ def run_ingest(job_id: uuid.UUID, source: PhotoSource) -> IngestResult:
                     )
                 )
                 result.inserted += 1
+                result.inserted_ids.append(photo_id)
 
             if total > 0:
                 job.progress = min(100, int(result.scanned * 100 / total))
@@ -114,6 +119,8 @@ def run_ingest(job_id: uuid.UUID, source: PhotoSource) -> IngestResult:
         job.progress = 100
         job.finished_at = datetime.now(timezone.utc)
         db.commit()
+
+        _enqueue_vision_pipeline(result.inserted_ids)
         return result
     except Exception as exc:  # noqa: BLE001 -- job runner must catch everything
         log.exception("ingest job %s crashed", job_id)
@@ -127,3 +134,26 @@ def run_ingest(job_id: uuid.UUID, source: PhotoSource) -> IngestResult:
         return result
     finally:
         db.close()
+
+
+def _enqueue_vision_pipeline(photo_ids: list[uuid.UUID]) -> None:
+    """Schedule index_photo per new photo + a follow-up cluster_faces.
+
+    Imported lazily so test runs that don't touch Celery don't drag in TF.
+    Silent on broker errors — vision can be re-run via the worker manually.
+    """
+    if not photo_ids:
+        return
+    if os.environ.get("ALBUM_DISABLE_VISION_ENQUEUE") == "1":
+        return
+    try:
+        from celery import chord
+
+        from app.workers.vision import cluster_faces, index_photo
+
+        header = [index_photo.s(str(pid)) for pid in photo_ids]
+        # `.si()` (immutable) — don't pass per-photo results to cluster_faces;
+        # it works off the DB.
+        chord(header)(cluster_faces.si())
+    except Exception:  # noqa: BLE001
+        log.exception("failed to enqueue vision pipeline for %d photos", len(photo_ids))

@@ -12,6 +12,8 @@ from sqlalchemy.orm import sessionmaker
 TEST_DB_URL = os.environ.setdefault(
     "DATABASE_URL", "postgresql+psycopg://album:album@localhost:5432/album_test"
 )
+# Default-off: tests that exercise vision enqueue should explicitly enable it.
+os.environ.setdefault("ALBUM_DISABLE_VISION_ENQUEUE", "1")
 
 
 def _ensure_test_database() -> None:
