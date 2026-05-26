@@ -1,0 +1,14 @@
+{
+  "app": {
+    "title": "Photo Album Creator",
+    "tagline": "Turn your scattered photos into a beautifully designed album with AI."
+  },
+  "health": {
+    "checking": "Checking server connection...",
+    "ok": "Server is up ✓",
+    "error": "No connection to server"
+  },
+  "lang": {
+    "toggle": "עברית"
+  }
+}
