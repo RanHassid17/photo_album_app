@@ -38,5 +38,25 @@
     "selectedCount": "נבחרו: {{count}}",
     "aiSummary": "ה־AI הציע {{count}} תמונות ({{model}})",
     "fallbackUsed": "ה־AI לא היה זמין — שימוש בדירוג אוטומטי"
+  },
+  "album": {
+    "title": "עריכת אלבום",
+    "style": "סגנון",
+    "styles": {
+      "modern": "מודרני",
+      "classic": "קלאסי",
+      "kids": "ילדים",
+      "romantic": "רומנטי",
+      "minimalist": "מינימליסטי"
+    },
+    "pageCount": "מספר עמודים",
+    "name": "שם האלבום (אופציונלי)",
+    "namePlaceholder": "למשל: קיץ 2024 בכרמל",
+    "generate": "צור אלבום",
+    "generating": "מעצב…",
+    "pageOf": "עמוד {{current}} מתוך {{total}}",
+    "needSelection": "בחר/י תחילה תמונות מהרשת",
+    "aiSummary": "האלבום עוצב על־ידי {{model}}",
+    "fallbackUsed": "ה־AI לא היה זמין — שימוש בפריסת רשת אוטומטית"
   }
 }

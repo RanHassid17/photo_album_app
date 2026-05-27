@@ -38,5 +38,25 @@
     "selectedCount": "Selected: {{count}}",
     "aiSummary": "AI suggested {{count}} photos ({{model}})",
     "fallbackUsed": "AI unavailable — used deterministic ranker"
+  },
+  "album": {
+    "title": "Design album",
+    "style": "Style",
+    "styles": {
+      "modern": "Modern",
+      "classic": "Classic",
+      "kids": "Kids",
+      "romantic": "Romantic",
+      "minimalist": "Minimalist"
+    },
+    "pageCount": "Pages",
+    "name": "Album name (optional)",
+    "namePlaceholder": "e.g. Summer 2024 on Carmel",
+    "generate": "Generate album",
+    "generating": "Designing…",
+    "pageOf": "Page {{current}} of {{total}}",
+    "needSelection": "Pick some photos first",
+    "aiSummary": "Album designed by {{model}}",
+    "fallbackUsed": "AI unavailable — used deterministic grid"
   }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { AlbumEditor } from "@/features/album/AlbumEditor";
 import { FilterPanel } from "@/features/filter/FilterPanel";
 import { emptyFilter, type FilterState } from "@/features/filter/types";
 import { SelectionGrid } from "@/features/selection/SelectionGrid";
@@ -67,6 +68,7 @@ export default function App() {
         <div className="flex-1 min-w-0">
           <SuggestPanel filter={filter} />
           <SelectionGrid filter={filter} />
+          <AlbumEditor />
         </div>
       </div>
     </main>

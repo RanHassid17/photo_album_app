@@ -126,3 +126,108 @@ export async function suggestSelection(req: SuggestRequest): Promise<SuggestResp
   if (!r.ok) throw new Error(`Suggest failed: ${r.status}`);
   return (await r.json()) as SuggestResponse;
 }
+
+// ---------- Layouts / Albums ----------
+
+export type AlbumStyle = "modern" | "classic" | "kids" | "romantic" | "minimalist";
+export type CommentPosition = "above" | "below" | "start" | "end" | "none";
+
+export interface LayoutPosition {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation_deg: number;
+}
+
+export interface LayoutItem {
+  photo_id: string;
+  position: LayoutPosition;
+  comment: string | null;
+  comment_position: CommentPosition;
+}
+
+export interface LayoutGrid {
+  rows: number;
+  cols: number;
+  gap: number;
+}
+
+export interface LayoutPage {
+  grid: LayoutGrid;
+  items: LayoutItem[];
+}
+
+export interface LayoutPlan {
+  pages: LayoutPage[];
+}
+
+export interface SuggestLayoutRequest {
+  photo_ids: string[];
+  page_count: number;
+  style: AlbumStyle;
+  name?: string;
+}
+
+export interface SuggestLayoutResponse {
+  album_id: string;
+  layout: LayoutPlan;
+  used_fallback: boolean;
+  model: string | null;
+}
+
+export async function suggestLayout(req: SuggestLayoutRequest): Promise<SuggestLayoutResponse> {
+  const r = await fetch(`${BASE_URL}/api/layouts/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!r.ok) throw new Error(`Layout suggest failed: ${r.status}`);
+  return (await r.json()) as SuggestLayoutResponse;
+}
+
+export interface AlbumItemRead {
+  id: string;
+  photo_id: string;
+  position_index: number;
+  position: LayoutPosition;
+  comment: string | null;
+  comment_position: CommentPosition;
+}
+
+export interface AlbumPageRead {
+  id: string;
+  index: number;
+  layout_json: { rows: number; cols: number; gap: number };
+  items: AlbumItemRead[];
+}
+
+export interface AlbumRead {
+  id: string;
+  name: string | null;
+  style: AlbumStyle;
+  page_count: number;
+  used_fallback: boolean;
+  model: string | null;
+  pages: AlbumPageRead[];
+}
+
+export interface AlbumSummary {
+  id: string;
+  name: string | null;
+  style: AlbumStyle;
+  page_count: number;
+  used_fallback: boolean;
+}
+
+export async function fetchAlbum(albumId: string): Promise<AlbumRead> {
+  const r = await fetch(`${BASE_URL}/api/albums/${albumId}`);
+  if (!r.ok) throw new Error(`Album fetch failed: ${r.status}`);
+  return (await r.json()) as AlbumRead;
+}
+
+export async function fetchAlbums(): Promise<AlbumSummary[]> {
+  const r = await fetch(`${BASE_URL}/api/albums`);
+  if (!r.ok) throw new Error(`Albums list failed: ${r.status}`);
+  return (await r.json()) as AlbumSummary[];
+}

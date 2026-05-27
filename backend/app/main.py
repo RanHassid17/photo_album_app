@@ -1,7 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import face_clusters, health, jobs, labels, photos, selection, sources
+from app.api import (
+    albums,
+    face_clusters,
+    health,
+    jobs,
+    labels,
+    layouts,
+    photos,
+    selection,
+    sources,
+)
 from app.config import get_settings
 
 settings = get_settings()
@@ -27,3 +37,5 @@ app.include_router(photos.router)
 app.include_router(face_clusters.router)
 app.include_router(labels.router)
 app.include_router(selection.router)
+app.include_router(layouts.router)
+app.include_router(albums.router)
