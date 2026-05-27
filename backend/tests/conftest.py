@@ -47,8 +47,18 @@ def _create_schema() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def _truncate_between_tests() -> Iterator[None]:
     yield
+    # Dispose any session-leaked connections from the test, then truncate.
+    # `engine.dispose()` closes idle pool connections; in-flight transactions
+    # are rolled back by their owning Session's __del__.
+    engine.dispose()
     with engine.begin() as conn:
-        conn.execute(text("TRUNCATE TABLE photos, jobs RESTART IDENTITY CASCADE"))
+        conn.execute(
+            text(
+                "TRUNCATE TABLE "
+                "face_embeddings, face_clusters, photo_labels, photos, jobs "
+                "RESTART IDENTITY CASCADE"
+            )
+        )
 
 
 @pytest.fixture

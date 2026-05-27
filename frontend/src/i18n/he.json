@@ -24,5 +24,19 @@
     "results": "{{count}} תמונות",
     "empty": "אין תוצאות לסינון הנוכחי",
     "loading": "טוען..."
+  },
+  "selection": {
+    "title": "בחירת תמונות",
+    "targetCount": "כמה תמונות לבחור",
+    "criteria": "מה הסיפור (אופציונלי)",
+    "criteriaPlaceholder": "למשל: יום הולדת של מאיה, ימי קיץ עם הכלבה",
+    "suggest": "המלץ באמצעות AI",
+    "suggesting": "חושב…",
+    "acceptAll": "אמץ הכל ({{count}})",
+    "dismissAi": "הסתר המלצה",
+    "clearAll": "נקה בחירה",
+    "selectedCount": "נבחרו: {{count}}",
+    "aiSummary": "ה־AI הציע {{count}} תמונות ({{model}})",
+    "fallbackUsed": "ה־AI לא היה זמין — שימוש בדירוג אוטומטי"
   }
 }

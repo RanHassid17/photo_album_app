@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilterPanel } from "@/features/filter/FilterPanel";
-import { PhotoGrid } from "@/features/filter/PhotoGrid";
 import { emptyFilter, type FilterState } from "@/features/filter/types";
+import { SelectionGrid } from "@/features/selection/SelectionGrid";
+import { SuggestPanel } from "@/features/selection/SuggestPanel";
 import { fetchHealth, type Health } from "@/lib/api";
 import { setLanguage } from "@/lib/i18n";
 
@@ -63,7 +64,10 @@ export default function App() {
           onChange={setFilter}
           onReset={() => setFilter(emptyFilter)}
         />
-        <PhotoGrid filter={filter} />
+        <div className="flex-1 min-w-0">
+          <SuggestPanel filter={filter} />
+          <SelectionGrid filter={filter} />
+        </div>
       </div>
     </main>
   );

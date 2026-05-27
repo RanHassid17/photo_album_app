@@ -26,7 +26,7 @@ export interface GpsBoundingBox {
 export interface PhotoSearchRequest {
   person_cluster_ids?: string[];
   animal_labels?: string[];
-  date_from?: string; // ISO 8601
+  date_from?: string;
   date_to?: string;
   gps_bbox?: GpsBoundingBox;
   limit?: number;
@@ -95,4 +95,34 @@ export async function fetchLabels(): Promise<LabelCount[]> {
   const r = await fetch(`${BASE_URL}/api/labels`);
   if (!r.ok) throw new Error(`Labels failed: ${r.status}`);
   return (await r.json()) as LabelCount[];
+}
+
+// ---------- Selection ----------
+
+export interface SuggestRequest {
+  photo_ids: string[];
+  target_count: number;
+  criteria?: string;
+}
+
+export interface SuggestPick {
+  photo_id: string;
+  score: number;
+  reason: string;
+}
+
+export interface SuggestResponse {
+  picks: SuggestPick[];
+  used_fallback: boolean;
+  model: string | null;
+}
+
+export async function suggestSelection(req: SuggestRequest): Promise<SuggestResponse> {
+  const r = await fetch(`${BASE_URL}/api/selection/suggest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!r.ok) throw new Error(`Suggest failed: ${r.status}`);
+  return (await r.json()) as SuggestResponse;
 }

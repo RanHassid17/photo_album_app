@@ -24,5 +24,19 @@
     "results": "{{count}} photos",
     "empty": "No results for the current filter",
     "loading": "Loading…"
+  },
+  "selection": {
+    "title": "Pick photos",
+    "targetCount": "How many to pick",
+    "criteria": "Story (optional)",
+    "criteriaPlaceholder": "e.g. Maya's birthday, summer with the dog",
+    "suggest": "Suggest with AI",
+    "suggesting": "Thinking…",
+    "acceptAll": "Accept all ({{count}})",
+    "dismissAi": "Dismiss",
+    "clearAll": "Clear selection",
+    "selectedCount": "Selected: {{count}}",
+    "aiSummary": "AI suggested {{count}} photos ({{model}})",
+    "fallbackUsed": "AI unavailable — used deterministic ranker"
   }
 }
