@@ -10,5 +10,19 @@
   },
   "lang": {
     "toggle": "עברית"
+  },
+  "filter": {
+    "title": "Filter photos",
+    "people": "People",
+    "labels": "Labels",
+    "dateFrom": "From",
+    "dateTo": "To",
+    "reset": "Reset",
+    "apply": "Apply",
+    "noPeople": "No people detected yet",
+    "noLabels": "No labels detected yet",
+    "results": "{{count}} photos",
+    "empty": "No results for the current filter",
+    "loading": "Loading…"
   }
 }

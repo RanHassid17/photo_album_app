@@ -10,5 +10,19 @@
   },
   "lang": {
     "toggle": "English"
+  },
+  "filter": {
+    "title": "סינון תמונות",
+    "people": "אנשים",
+    "labels": "תוויות",
+    "dateFrom": "מתאריך",
+    "dateTo": "עד תאריך",
+    "reset": "נקה",
+    "apply": "סנן",
+    "noPeople": "טרם זוהו אנשים",
+    "noLabels": "טרם זוהו תוויות",
+    "results": "{{count}} תמונות",
+    "empty": "אין תוצאות לסינון הנוכחי",
+    "loading": "טוען..."
   }
 }

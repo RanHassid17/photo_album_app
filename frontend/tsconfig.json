@@ -14,7 +14,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["vitest/globals"],
+    "types": ["vitest/globals", "vite/client", "node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
