@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
     albums,
+    exports,
     face_clusters,
     health,
     jobs,
@@ -39,3 +40,4 @@ app.include_router(labels.router)
 app.include_router(selection.router)
 app.include_router(layouts.router)
 app.include_router(albums.router)
+app.include_router(exports.router)

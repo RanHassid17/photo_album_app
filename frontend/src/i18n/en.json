@@ -57,6 +57,16 @@
     "pageOf": "Page {{current}} of {{total}}",
     "needSelection": "Pick some photos first",
     "aiSummary": "Album designed by {{model}}",
-    "fallbackUsed": "AI unavailable — used deterministic grid"
+    "fallbackUsed": "AI unavailable — used deterministic grid",
+    "export": {
+      "heading": "Export",
+      "pdf": "Download PDF",
+      "print": "Download print ZIP",
+      "preparing": "Preparing…",
+      "lowResWarning": "{{count}} photo(s) are smaller than at least one print size; output will be upscaled.",
+      "lowResWarning_one": "{{count}} photo is smaller than at least one print size; output will be upscaled.",
+      "lowResOk": "All photos meet print resolution.",
+      "failed": "Export failed: {{message}}"
+    }
   }
 }

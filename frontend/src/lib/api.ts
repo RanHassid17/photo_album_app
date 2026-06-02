@@ -231,3 +231,68 @@ export async function fetchAlbums(): Promise<AlbumSummary[]> {
   if (!r.ok) throw new Error(`Albums list failed: ${r.status}`);
   return (await r.json()) as AlbumSummary[];
 }
+
+// ---------- Export ----------
+
+export interface LowResWarning {
+  photo_id: string;
+  original_w: number | null;
+  original_h: number | null;
+  size: string;
+  required_w: number;
+  required_h: number;
+}
+
+export interface ExportQualityResponse {
+  album_id: string;
+  low_resolution_warnings: LowResWarning[];
+}
+
+export async function fetchExportQuality(albumId: string): Promise<ExportQualityResponse> {
+  const r = await fetch(`${BASE_URL}/api/albums/${albumId}/export/quality`);
+  if (!r.ok) throw new Error(`Quality check failed: ${r.status}`);
+  return (await r.json()) as ExportQualityResponse;
+}
+
+function _filenameFromHeader(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const utf = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf?.[1]) {
+    try {
+      return decodeURIComponent(utf[1]);
+    } catch {
+      // fall through
+    }
+  }
+  const plain = header.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] ?? fallback;
+}
+
+async function _downloadExport(url: string, fallbackName: string): Promise<void> {
+  const r = await fetch(url, { method: "POST" });
+  if (!r.ok) throw new Error(`Export failed: ${r.status}`);
+  const blob = await r.blob();
+  const filename = _filenameFromHeader(r.headers.get("content-disposition"), fallbackName);
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
+}
+
+export async function downloadAlbumPdf(albumId: string): Promise<void> {
+  await _downloadExport(
+    `${BASE_URL}/api/albums/${albumId}/export/pdf`,
+    `album-${albumId}.pdf`,
+  );
+}
+
+export async function downloadAlbumPrintZip(albumId: string): Promise<void> {
+  await _downloadExport(
+    `${BASE_URL}/api/albums/${albumId}/export/print`,
+    `album-${albumId}-print.zip`,
+  );
+}

@@ -7,6 +7,7 @@ import type { AlbumStyle } from "@/lib/api";
 
 import { useSelectionStore } from "@/features/selection/store";
 
+import { ExportPanel } from "./ExportPanel";
 import { PageView } from "./PageView";
 import { useAlbumStore } from "./store";
 
@@ -157,6 +158,8 @@ export function AlbumEditor() {
           </div>
 
           {album.pages[safePageIdx] && <PageView page={album.pages[safePageIdx]} />}
+
+          <ExportPanel albumId={album.id} />
         </div>
       )}
     </section>
