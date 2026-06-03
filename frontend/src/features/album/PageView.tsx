@@ -30,7 +30,7 @@ function ItemBox({ item }: { item: AlbumItemRead }) {
 
   // Reserve space for the comment block when it's adjacent to the photo.
   const commentSize = 0.12; // 12% of the cell on the chosen edge
-  let imgInset = { left: 0, top: 0, right: 0, bottom: 0 };
+  const imgInset = { left: 0, top: 0, right: 0, bottom: 0 };
   const showComment = comment && comment_position !== "none";
 
   if (showComment) {

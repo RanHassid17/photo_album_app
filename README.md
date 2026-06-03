@@ -16,7 +16,7 @@ AI-powered web app that turns scattered photo libraries (Google Photos, iCloud, 
 | Database | Postgres 16 |
 | Vision | DeepFace (faces), YOLOv8 (labels), Pillow + exifread (EXIF/quality) |
 | AI orchestration | Claude Sonnet 4.6 (selection + layout agents) |
-| Export | Playwright (PDF), Pillow (300 DPI print) |
+| Export | Pillow (multi-page PDF + 300 DPI print ZIP) |
 
 ## Quickstart
 
@@ -67,7 +67,25 @@ make lint    # ruff + eslint
 make clean   # remove caches
 ```
 
+### End-to-end smoke
+
+`backend/tests/test_e2e_smoke.py` walks the full MVP flow against the FastAPI app
+and real Postgres test DB: ingest a ZIP → search → suggest selection →
+suggest layout → export PDF → export print ZIP. Runs as part of `make test`.
+
+A browser-driven Playwright UI smoke is deferred to V1. The backend smoke covers
+every API the frontend calls, and `tsc -b` enforces frontend code correctness;
+adding Chromium to CI for marginal extra coverage didn't justify the cost.
+
+### RTL lint rule
+
+`frontend/eslint.config.js` registers `rtl/no-hardcoded-ltr-tailwind`, which
+errors on physical-direction Tailwind classes (`pl-`, `ml-`, `text-left`,
+`border-l-`, etc.). Use the logical variants (`ps-`, `ms-`, `text-start`,
+`border-s-`) so the same JSX renders correctly in Hebrew and English.
+
 ## Status
 
-P0 scaffold — getting `make dev` to a Hebrew "hello" page that talks to `/healthz`.
-Subsequent phases (P1 ingest → P5 polish) tracked in `docs/ARCHITECTURE.md` §10.
+MVP feature-complete through P5 polish — ingest, vision indexing, filter,
+selection agent, layout agent, export, RTL lint rule, and a backend E2E smoke
+test are all wired up. See `docs/ARCHITECTURE.md` §10 for the phase map.
