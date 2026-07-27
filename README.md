@@ -17,6 +17,9 @@ AI-powered web app that turns scattered photo libraries (Google Photos, iCloud, 
 | Vision | DeepFace (faces), YOLOv8 (labels), Pillow + exifread (EXIF/quality) |
 | AI orchestration | Claude Sonnet 4.6 (selection + layout agents) |
 | Export | Pillow (multi-page PDF + 300 DPI print ZIP) |
+| Deploy (V1) | Railway — staging (`dev`) + production (`main`), separate frontend/backend services |
+| Managed data (V1) | Supabase — Postgres + Storage + Auth |
+| Design workflow | Stitch / Figma MCP → React components |
 
 ## Quickstart
 
@@ -84,8 +87,22 @@ errors on physical-direction Tailwind classes (`pl-`, `ml-`, `text-left`,
 `border-l-`, etc.). Use the logical variants (`ps-`, `ms-`, `text-start`,
 `border-s-`) so the same JSX renders correctly in Hebrew and English.
 
+## Deployment (V1)
+
+Going-live target is **Railway** with **Supabase** as managed Postgres + storage +
+auth. Two environments — `production` (git `main`) and `staging` (git `dev`) — each
+with separate `backend` and `frontend` services. See
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full topology and setup steps,
+and `docs/ARCHITECTURE.md` §13 for the stack decisions (why we keep FastAPI/React
+and adopt Supabase + Railway rather than migrating to Flask/HTML/CrewAI).
+
+UX/UI work flows through **Stitch / the Figma MCP** into `frontend/src/features/`.
+
 ## Status
 
 MVP feature-complete through P5 polish — ingest, vision indexing, filter,
 selection agent, layout agent, export, RTL lint rule, and a backend E2E smoke
 test are all wired up. See `docs/ARCHITECTURE.md` §10 for the phase map.
+
+**Next (V1):** deploy to Railway, migrate DB/storage/auth to Supabase, wire the
+`dev` → staging / `main` → production branch flow. See `docs/ARCHITECTURE.md` §13.

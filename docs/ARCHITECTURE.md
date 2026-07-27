@@ -1,8 +1,8 @@
 # Photo Album Creator — Architectural Design Document
 
-**Status:** Draft v1.0
+**Status:** v1.1 — MVP complete; V1 direction added (§13)
 **Author:** Architecture pass from `prompt_creator/Photo_Album_Creator_Prompt_Spec.md`
-**Date:** 2026-05-26
+**Date:** 2026-05-26 (v1.0) · 2026-07-24 (v1.1: Supabase + Railway + tooling)
 **Audience:** Engineering team, future contributors, stakeholder review
 
 This document is the response to the architectural questions posed in `prompt_creator/claude_first_prompt_photo_album_creator.md`. It is opinionated, optimized for fast MVP delivery on a single local machine, and designed so the same seams scale to a commercial SaaS without rewrites.
@@ -429,4 +429,59 @@ Once `make dev` runs cleanly and the browser shows a working RTL page calling th
 
 ---
 
-*— End of Architecture Document v1.0 —*
+## 13. V1 Direction — Managed Services, Deployment & Tooling
+
+*Added 2026-07-24. The MVP (§10, P0–P5) is feature-complete on the local stack. This section records the agreed direction for taking it live, without rewriting what already works.*
+
+### 13.1 Stack decisions — adopt / keep / defer
+
+A set of stack and tooling changes was proposed. Rather than migrate a working MVP wholesale, each was triaged:
+
+| Proposed | Current | Decision | Rationale |
+|---|---|---|---|
+| Flask | FastAPI | **Keep FastAPI** | Async, Pydantic validation, and auto-OpenAPI are load-bearing here (SSE job progress, Claude tool-use schemas, typed frontend client). Flask would be a lateral-to-down move for no gain. |
+| Plain HTML/CSS | React + Vite + Tailwind | **Keep React** | Built, tested, RTL-linted, working. The wizard + Fabric.js canvas need component state; plain HTML/CSS is a downgrade. React compiles to HTML/CSS regardless. |
+| Supabase | Local Postgres + local FS + deferred auth | **Adopt for V1** | Single managed service covers three MVP "V1 upgrade" seams at once — Postgres, `BlobStore`, and `get_current_user` auth. See §13.2. |
+| CrewAI | Direct Claude calls (`agents/selection.py`, `agents/layout.py`) | **Defer** | §5 deliberately argues against agent loops for these bounded tool-use tasks — they add latency and cost. Revisit only if V1 introduces genuinely multi-step, autonomous flows. |
+| Railway | Local dev only | **Adopt for V1** | Managed deploy target with per-branch environments. See §13.3. |
+| Stitch / Figma MCP | — | **Adopt as workflow** | UX/UI design + design-to-code. Non-conflicting, additive. See §13.4. |
+| Andrej Karpathy coding skills | — | **Adopt as workflow** | Coding-practice guidance for contributors. No code impact. |
+
+### 13.2 Supabase adoption (V1)
+
+Supabase slots into interface seams the MVP already defined, so adoption is additive, not a rewrite:
+
+- **Postgres** — Supabase *is* Postgres. Point `DATABASE_URL` at the Supabase connection string; Alembic migrations run unchanged. `pgvector` (§4 face-similarity upgrade) is a one-click extension on Supabase.
+- **Blob storage** — implement a `SupabaseBlobStore` behind the existing `BlobStore` interface (§4, `backend/app/storage/`). Originals + thumbnails move from local FS to a Supabase Storage bucket. No API-layer changes.
+- **Auth** — replace the `get_current_user` stub (§7 "Auth deferred to V1") with Supabase Auth (JWT verified as a FastAPI dependency). Call sites are untouched by design.
+- **Privacy note** — the core promise (photo bytes never leave the user's account to reach Claude) is unaffected: Supabase Storage holds bytes; `agents/` still receives metadata JSON only. The §11 lint rule still applies.
+
+### 13.3 Railway deployment topology (V1)
+
+Two environments, each with two services, mapped to git branches:
+
+```
+Railway project: photo-album-app
+├── environment: production
+│   ├── service: backend   ← deploys from git branch  main
+│   └── service: frontend  ← deploys from git branch  main
+└── environment: staging
+    ├── service: backend   ← deploys from git branch  dev
+    └── service: frontend  ← deploys from git branch  dev
+```
+
+- **Branch → environment mapping:** `main` → production, `dev` → staging. A push to `dev` auto-deploys staging; a merge to `main` auto-deploys production. (A `dev` branch is created as part of this change.)
+- **Service split:** backend (uvicorn/FastAPI) and frontend (Vite static build) are separate Railway services so they scale and redeploy independently. Config lives in `backend/railway.json` and `frontend/railway.json`; each service's Railway **Root Directory** is set to `backend/` and `frontend/` respectively (monorepo).
+- **Managed data:** Postgres and Redis are *not* run as Railway services in V1 — Postgres comes from Supabase (§13.2); Redis/Celery is provisioned as a Railway plugin or deferred until async indexing runs in the cloud.
+- **Secrets:** `ANTHROPIC_API_KEY`, `DATABASE_URL` (Supabase), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` are set per-environment as Railway variables (staging keys ≠ production keys). Never committed.
+- **Provisioning:** step-by-step in `docs/DEPLOYMENT.md`. The Railway account/login step is manual (requires the owner's credentials); the repo ships the IaC config so services build identically once linked.
+
+### 13.4 Design & coding workflow tooling
+
+- **UX/UI:** Stitch and the Figma MCP/CLI are the design surface — generate and iterate screens in Figma/Stitch, then bring them into `frontend/src/features/` as React components. RTL and the §6 logical-property rule still govern the generated markup.
+- **Coding practice:** the Andrej Karpathy coding skills are adopted as contributor guidance.
+- **Session logging:** an Obsidian vault (`Photo Album App/`) mirrors progress. A Claude Code **Stop hook** appends a session marker to `Progress Log.md` at session end; narrative summaries are written deliberately and contain no source code.
+
+---
+
+*— End of Architecture Document v1.1 —*
