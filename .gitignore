@@ -26,6 +26,11 @@ frontend/dist/
 frontend/coverage/
 frontend/tsconfig.tsbuildinfo
 *.tsbuildinfo
+# stray tsc emit next to sources — Vite bundles TS directly, tsc only type-checks.
+# Scoped so the real configs (eslint.config.js, postcss.config.js, eslint-rules/) stay tracked.
+frontend/src/**/*.js
+frontend/src/**/*.js.map
+frontend/vite.config.js
 *.log
 npm-debug.log*
 yarn-debug.log*
