@@ -158,4 +158,4 @@ The breadth of development, the technological range spanning vision, agents and 
 
 ---
 
-Supporting documents: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (architectural design and decision record), [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) (Railway + Supabase topology), [`prompt_creator/Photo_Album_Creator_Prompt_Spec.md`](prompt_creator/Photo_Album_Creator_Prompt_Spec.md) (original product specification), [`README.md`](README.md) (setup and usage).
+Supporting documents: [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) (architectural design and decision record), [`docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) (Railway + Supabase topology), [`prompt_creator/Photo_Album_Creator_Prompt_Spec.md`](Photo_Album_Creator_Prompt_Spec.md) (original product specification), [`README.md`](../README.md) (setup and usage).
