@@ -27,22 +27,30 @@ export function PageView({ page }: Props) {
 
 function ItemBox({ item }: { item: AlbumItemRead }) {
   const { position, comment, comment_position } = item;
+  const showComment = Boolean(comment) && comment_position !== "none";
 
-  // Reserve space for the comment block when it's adjacent to the photo.
-  const commentSize = 0.12; // 12% of the cell on the chosen edge
-  const imgInset = { left: 0, top: 0, right: 0, bottom: 0 };
-  const showComment = comment && comment_position !== "none";
+  // The caption is a flex sibling of the photo rather than an overlay: the photo gets
+  // whatever space is left, so it can never sit under its own caption, and the caption
+  // stays attached to the image regardless of the photo's aspect ratio.
+  // In an RTL document `flex-row` already places the first child at the inline start,
+  // so `start`/`end` need no physical-direction classes.
+  const vertical = comment_position === "above" || comment_position === "below";
+  const captionFirst = comment_position === "above" || comment_position === "start";
 
-  if (showComment) {
-    if (comment_position === "above") imgInset.top = commentSize;
-    if (comment_position === "below") imgInset.bottom = commentSize;
-    if (comment_position === "start") imgInset.left = commentSize;
-    if (comment_position === "end") imgInset.right = commentSize;
-  }
+  const caption = showComment ? (
+    <div
+      className={`shrink-0 text-[10px] sm:text-xs text-gray-700 text-center truncate ${
+        vertical ? "w-full" : "max-w-[30%]"
+      }`}
+      title={comment ?? undefined}
+    >
+      {comment}
+    </div>
+  ) : null;
 
   return (
     <div
-      className="absolute"
+      className={`absolute flex items-center gap-1 ${vertical ? "flex-col" : "flex-row"}`}
       style={{
         insetInlineStart: `${position.x * 100}%`,
         top: `${position.y * 100}%`,
@@ -53,64 +61,16 @@ function ItemBox({ item }: { item: AlbumItemRead }) {
           : undefined,
       }}
     >
+      {captionFirst && caption}
       <img
         src={photoThumbUrl(item.photo_id)}
         alt=""
         loading="lazy"
-        className="absolute object-cover rounded-sm shadow-sm"
-        style={{
-          left: `${imgInset.left * 100}%`,
-          top: `${imgInset.top * 100}%`,
-          right: `${imgInset.right * 100}%`,
-          bottom: `${imgInset.bottom * 100}%`,
-          width: "auto",
-          height: "auto",
-        }}
+        // object-contain mirrors the PDF renderer's letterbox fit, so the on-screen
+        // preview matches the exported file.
+        className="flex-1 min-h-0 min-w-0 w-full h-full object-contain rounded-sm shadow-sm"
       />
-      {showComment && (
-        <div
-          className="absolute text-[10px] sm:text-xs text-gray-700 px-1 truncate"
-          style={positionForComment(comment_position, commentSize)}
-          title={comment ?? undefined}
-        >
-          {comment}
-        </div>
-      )}
+      {!captionFirst && caption}
     </div>
   );
-}
-
-function positionForComment(
-  pos: AlbumItemRead["comment_position"],
-  size: number,
-): React.CSSProperties {
-  const sizePct = `${size * 100}%`;
-  switch (pos) {
-    case "above":
-      return { left: 0, right: 0, top: 0, height: sizePct, display: "flex", alignItems: "center" };
-    case "below":
-      return { left: 0, right: 0, bottom: 0, height: sizePct, display: "flex", alignItems: "center" };
-    case "start":
-      return {
-        insetInlineStart: 0,
-        top: 0,
-        bottom: 0,
-        width: sizePct,
-        writingMode: "vertical-rl",
-        display: "flex",
-        alignItems: "center",
-      };
-    case "end":
-      return {
-        insetInlineEnd: 0,
-        top: 0,
-        bottom: 0,
-        width: sizePct,
-        writingMode: "vertical-rl",
-        display: "flex",
-        alignItems: "center",
-      };
-    default:
-      return { display: "none" };
-  }
 }

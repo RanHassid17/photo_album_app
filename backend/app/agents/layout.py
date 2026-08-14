@@ -75,11 +75,24 @@ def call_layout_agent(
         )
 
     valid_ids: set[uuid.UUID] = {uuid.UUID(p["photo_id"]) for p in photos_metadata}
+    placed: set[uuid.UUID] = set()
     for page in parsed.pages:
         for item in page.items:
             if item.photo_id not in valid_ids:
                 raise LayoutAgentError(
                     f"layout references photo_id not in input: {item.photo_id}"
                 )
+            # Every input photo must appear exactly once. Without this the agent can
+            # silently repeat one photo and drop another -- the layout still validates
+            # against the schema, so nothing else would catch it.
+            if item.photo_id in placed:
+                raise LayoutAgentError(f"layout places photo {item.photo_id} more than once")
+            placed.add(item.photo_id)
+
+    missing = valid_ids - placed
+    if missing:
+        raise LayoutAgentError(
+            f"layout omits {len(missing)} of {len(valid_ids)} input photos"
+        )
 
     return parsed

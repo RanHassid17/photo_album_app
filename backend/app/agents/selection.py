@@ -56,7 +56,7 @@ def call_selection_agent(
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         message = client.messages.create(
             model=settings.anthropic_model,
-            max_tokens=2048,
+            max_tokens=4096,
             system=SELECTION_SYSTEM,
             tools=[SELECTION_TOOL_SCHEMA],
             tool_choice={"type": "tool", "name": "submit_selection"},
@@ -81,5 +81,20 @@ def call_selection_agent(
     bogus = [p.photo_id for p in parsed.picks if p.photo_id not in valid_ids]
     if bogus:
         raise SelectionAgentError(f"Claude returned photo_ids not in input: {bogus[:3]}")
+
+    # Same contract the Layout Agent enforces: no repeats, and exactly the count we
+    # asked for. Truncating a short response downstream would report success while
+    # silently handing back fewer photos than the user chose.
+    seen: set[str] = set()
+    for pick in parsed.picks:
+        if pick.photo_id in seen:
+            raise SelectionAgentError(f"Claude returned duplicate photo_id: {pick.photo_id}")
+        seen.add(pick.photo_id)
+
+    expected = min(target_count, len(photos_metadata))
+    if len(parsed.picks) != expected:
+        raise SelectionAgentError(
+            f"target_count mismatch: agent returned {len(parsed.picks)}, wanted {expected}"
+        )
 
     return parsed

@@ -126,6 +126,9 @@ export function AlbumEditor() {
 
       {album && (
         <div className="space-y-3">
+          {album.name && (
+            <h3 className="text-base font-semibold text-gray-900">{album.name}</h3>
+          )}
           <div className="flex items-center justify-between text-xs text-gray-600">
             <span>
               {album.used_fallback ? (
