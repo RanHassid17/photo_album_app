@@ -40,11 +40,25 @@ def _print_status() -> int:
         db.close()
 
     print(f"photos:          {photos}")
-    print(f"indexed:         {indexed} / {photos}")
+    # indexed_at is not reset by a re-index, so this counts anything ever indexed —
+    # it is not this run's progress. Queue depth below is.
+    print(f"ever indexed:    {indexed} / {photos}  (not this run)")
+    print(f"queue remaining: {_queue_depth()}  <- this run's progress")
     print(f"face embeddings: {embeddings}")
     print(f"face clusters:   {clusters}  (written once, after the last photo)")
     print(f"worker running:  {'yes' if _worker_is_alive() else 'NO — run `make worker`'}")
     return 0
+
+
+def _queue_depth() -> str:
+    """Tasks still waiting on the broker — the real measure of re-index progress."""
+    try:
+        from app.workers.celery_app import celery_app
+
+        with celery_app.connection_or_acquire() as conn:
+            return str(conn.default_channel.client.llen("celery"))
+    except Exception:  # noqa: BLE001
+        return "unknown"
 
 
 def _worker_is_alive(timeout: float = 5.0) -> bool:
