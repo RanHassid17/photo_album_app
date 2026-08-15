@@ -22,6 +22,42 @@ from app.db import SessionLocal
 from app.models import FaceCluster, FaceEmbedding, Photo
 
 
+def _print_status() -> int:
+    db = SessionLocal()
+    try:
+        photos = db.scalar(select(func.count()).select_from(Photo)) or 0
+        embeddings = db.scalar(select(func.count()).select_from(FaceEmbedding)) or 0
+        clusters = db.scalar(select(func.count()).select_from(FaceCluster)) or 0
+        indexed = (
+            db.scalar(
+                select(func.count())
+                .select_from(Photo)
+                .where(Photo.indexed_at.is_not(None))
+            )
+            or 0
+        )
+    finally:
+        db.close()
+
+    print(f"photos:          {photos}")
+    print(f"indexed:         {indexed} / {photos}")
+    print(f"face embeddings: {embeddings}")
+    print(f"face clusters:   {clusters}  (written once, after the last photo)")
+    print(f"worker running:  {'yes' if _worker_is_alive() else 'NO — run `make worker`'}")
+    return 0
+
+
+def _worker_is_alive(timeout: float = 5.0) -> bool:
+    """True if at least one Celery worker answers a ping."""
+    try:
+        from app.workers.celery_app import celery_app
+
+        replies = celery_app.control.ping(timeout=timeout)
+        return bool(replies)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -30,10 +66,27 @@ def main() -> int:
     parser.add_argument(
         "--dry-run", action="store_true", help="report what would happen, change nothing"
     )
+    parser.add_argument(
+        "--status", action="store_true", help="show re-indexing progress and exit"
+    )
     args = parser.parse_args()
 
+    if args.status:
+        return _print_status()
+
     if not args.yes and not args.dry_run:
-        parser.error("pass --dry-run to preview, or --yes to run")
+        parser.error("pass --dry-run to preview, or --yes to run, or --status to check")
+
+    # Deleting face data before confirming anything can rebuild it leaves the app
+    # showing zero people with no explanation. Check first.
+    if args.yes and not _worker_is_alive():
+        print("ERROR: no Celery worker is responding.")
+        print()
+        print("This script deletes all face data and queues re-indexing. Without a")
+        print("worker consuming the queue you would be left with no faces at all.")
+        print()
+        print("Start one in another terminal:  make worker")
+        return 1
 
     db = SessionLocal()
     try:
@@ -78,7 +131,8 @@ def main() -> int:
 
     chord([index_photo.s(pid) for pid in photo_ids])(cluster_faces.si())
     print(f"queued re-indexing for {len(photo_ids)} photos")
-    print("watch progress in the Celery worker terminal (`make worker`)")
+    print("watch progress in the Celery worker terminal, or run:")
+    print("  .venv/bin/python -m scripts.reindex_faces --status")
     return 0
 
 
