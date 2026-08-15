@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import FaceCluster, FaceEmbedding, Photo, PhotoLabel
+from app.services.imaging import analysis_copy
 from app.workers.celery_app import celery_app  # noqa: F401 -- bind shared_tasks to our app
 from app.workers.exif import extract_exif_metadata
 from app.workers.models import face_embeddings, label_objects
@@ -55,51 +56,21 @@ def index_photo(self, photo_id: str) -> dict[str, Any]:  # noqa: ANN001 -- celer
             db.commit()
             return _outcome_to_dict(outcome)
 
-        # --- EXIF + dimensions ---
+        # Decode the source once and work from a downscaled JPEG. Previously EXIF, the
+        # face model and the object model each re-decoded the original: three LibRaw
+        # passes over a 30MB RAW per photo, with detection then running at full
+        # resolution. Measured cost was ~300s/photo.
         try:
-            meta = extract_exif_metadata(path)
-            photo.width = meta.width
-            photo.height = meta.height
-            photo.taken_at = meta.taken_at
-            photo.gps_lat = meta.gps_lat
-            photo.gps_lng = meta.gps_lng
+            analysis_ctx = analysis_copy(path)
         except Exception as exc:  # noqa: BLE001
-            log.warning("exif failed for %s: %s", pid, exc)
-            outcome.errors.append(f"exif:{exc}")
+            log.warning("could not decode %s: %s", pid, exc)
+            outcome.errors.append(f"decode:{exc}")
+            photo.indexed_at = datetime.now(timezone.utc)
+            db.commit()
+            return _outcome_to_dict(outcome)
 
-        # --- Quality (blur) ---
-        try:
-            photo.blur_score = compute_blur_score(path)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("blur failed for %s: %s", pid, exc)
-            outcome.errors.append(f"blur:{exc}")
-
-        # --- Faces ---
-        try:
-            for face in face_embeddings(path):
-                db.add(
-                    FaceEmbedding(
-                        photo_id=pid,
-                        bbox=face["bbox"],
-                        embedding=face["embedding_bytes"],
-                        embedding_dim=face["dim"],
-                    )
-                )
-                outcome.face_count += 1
-        except Exception as exc:  # noqa: BLE001
-            log.warning("faces failed for %s: %s", pid, exc)
-            outcome.errors.append(f"faces:{exc}")
-
-        # --- Object/animal labels ---
-        try:
-            for label, confidence in label_objects(path):
-                db.add(
-                    PhotoLabel(photo_id=pid, label=label, confidence=confidence)
-                )
-                outcome.label_count += 1
-        except Exception as exc:  # noqa: BLE001
-            log.warning("labels failed for %s: %s", pid, exc)
-            outcome.errors.append(f"labels:{exc}")
+        with analysis_ctx as (apath, scale, original_size):
+            _index_from_analysis(db, photo, pid, path, apath, scale, original_size, outcome)
 
         photo.indexed_at = datetime.now(timezone.utc)
         db.commit()
@@ -110,6 +81,66 @@ def index_photo(self, photo_id: str) -> dict[str, Any]:  # noqa: ANN001 -- celer
         raise
     finally:
         db.close()
+
+
+def _index_from_analysis(  # noqa: PLR0913
+    db: Session,
+    photo: Photo,
+    pid: uuid.UUID,
+    original_path: Path,
+    apath: Path,
+    scale: float,
+    original_size: tuple[int, int],
+    outcome: "IndexOutcome",
+) -> None:
+    # --- EXIF + dimensions ---
+    try:
+        meta = extract_exif_metadata(original_path, known_size=original_size)
+        photo.width = meta.width
+        photo.height = meta.height
+        photo.taken_at = meta.taken_at
+        photo.gps_lat = meta.gps_lat
+        photo.gps_lng = meta.gps_lng
+    except Exception as exc:  # noqa: BLE001
+        log.warning("exif failed for %s: %s", pid, exc)
+        outcome.errors.append(f"exif:{exc}")
+
+    # --- Quality (blur) ---
+    # Scored on the analysis copy: OpenCV cannot read RAW or HEIC, so every RAW
+    # photo previously ended up with no blur score at all, which silently degraded
+    # the selection ranking.
+    try:
+        photo.blur_score = compute_blur_score(apath)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("blur failed for %s: %s", pid, exc)
+        outcome.errors.append(f"blur:{exc}")
+
+    # --- Faces ---
+    try:
+        for face in face_embeddings(apath, scale=scale):
+            db.add(
+                FaceEmbedding(
+                    photo_id=pid,
+                    bbox=face["bbox"],
+                    embedding=face["embedding_bytes"],
+                    embedding_dim=face["dim"],
+                )
+            )
+            outcome.face_count += 1
+    except Exception as exc:  # noqa: BLE001
+        log.warning("faces failed for %s: %s", pid, exc)
+        outcome.errors.append(f"faces:{exc}")
+
+    # --- Object/animal labels ---
+    try:
+        for label, confidence in label_objects(apath):
+            db.add(
+                PhotoLabel(photo_id=pid, label=label, confidence=confidence)
+            )
+            outcome.label_count += 1
+    except Exception as exc:  # noqa: BLE001
+        log.warning("labels failed for %s: %s", pid, exc)
+        outcome.errors.append(f"labels:{exc}")
 
 
 @shared_task(name="vision.cluster_faces")

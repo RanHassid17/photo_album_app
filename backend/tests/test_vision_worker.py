@@ -41,7 +41,7 @@ def _seed_jpeg(target: Path, color=(120, 80, 60)) -> Path:
 def stub_face_embeddings(monkeypatch):
     """Patch DeepFace.represent with a deterministic stub returning one 128-d face."""
 
-    def fake_faces(_path):
+    def fake_faces(_path, scale: float = 1.0):
         vec = np.linspace(0.0, 1.0, 128, dtype=np.float32)
         yield {
             "bbox": {"x": 10, "y": 10, "w": 32, "h": 32},

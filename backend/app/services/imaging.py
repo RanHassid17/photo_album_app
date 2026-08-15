@@ -114,3 +114,46 @@ def readable_path(path: Path | str) -> Iterator[Path]:
         yield tmp
     finally:
         tmp.unlink(missing_ok=True)
+
+
+# Longest edge fed to the detectors. MTCNN builds an image pyramid and YOLO letterboxes,
+# so cost scales with pixels: a 6022x4024 RAW is ~9x the work of the same frame at 2000px
+# for no gain in face or object recall at album scale.
+ANALYSIS_MAX_EDGE = 2000
+
+
+@contextmanager
+def analysis_copy(path: Path | str) -> Iterator[tuple[Path, float, tuple[int, int]]]:
+    """Yield (jpeg_path, scale_to_original, original_size) for the vision models.
+
+    Decodes the source exactly once. Indexing used to decode a RAW three times per
+    photo -- for EXIF dimensions, for the face model, and again for the object model --
+    and then still failed the blur score, because OpenCV cannot read RAW or HEIC either.
+
+    `scale_to_original` converts detector coordinates back to the original frame, so
+    stored bounding boxes stay valid against the full-resolution file.
+    """
+    path = Path(path)
+    img = open_image(path)
+    try:
+        original = (img.width, img.height)
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+
+        longest = max(original)
+        scale = 1.0
+        if longest > ANALYSIS_MAX_EDGE:
+            scale = longest / ANALYSIS_MAX_EDGE
+            img = img.resize(
+                (max(1, round(img.width / scale)), max(1, round(img.height / scale))),
+                Image.LANCZOS,
+            )
+
+        tmp = Path(tempfile.mkstemp(suffix=".jpg", prefix=f"{path.stem}_an_")[1])
+        try:
+            img.save(tmp, format="JPEG", quality=92)
+            yield tmp, scale, original
+        finally:
+            tmp.unlink(missing_ok=True)
+    finally:
+        img.close()

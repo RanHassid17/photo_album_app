@@ -60,14 +60,21 @@ def _parse_gps(tags) -> tuple[float | None, float | None]:
     return lat, lng
 
 
-def extract_exif_metadata(path: Path) -> PhotoMetadata:
+def extract_exif_metadata(
+    path: Path, known_size: tuple[int, int] | None = None
+) -> PhotoMetadata:
     width: int | None = None
     height: int | None = None
-    try:
-        with open_image(path) as img:
-            width, height = img.size
-    except Exception:  # noqa: BLE001
-        pass
+    if known_size is not None:
+        # Caller already decoded the file; decoding a 30MB RAW again just for its
+        # dimensions was a third of the per-photo cost.
+        width, height = known_size
+    else:
+        try:
+            with open_image(path) as img:
+                width, height = img.size
+        except Exception:  # noqa: BLE001
+            pass
 
     with path.open("rb") as fh:
         tags = exifread.process_file(fh, details=False)

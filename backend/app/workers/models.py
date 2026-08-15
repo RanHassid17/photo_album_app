@@ -96,8 +96,12 @@ def _get_yolo():
     return _yolo_model
 
 
-def face_embeddings(path: Path) -> Iterator[dict[str, Any]]:
-    """Yield {'bbox': {...}, 'embedding_bytes': bytes, 'dim': int} per detected face."""
+def face_embeddings(path: Path, scale: float = 1.0) -> Iterator[dict[str, Any]]:
+    """Yield {'bbox': {...}, 'embedding_bytes': bytes, 'dim': int} per detected face.
+
+    `scale` maps detector coordinates back to the original frame when detection ran on
+    a downscaled copy, so stored boxes stay valid against the full-resolution file.
+    """
     from deepface import DeepFace
 
     model_name, detector, _ = _vision_settings()
@@ -130,10 +134,10 @@ def face_embeddings(path: Path) -> Iterator[dict[str, Any]]:
         vec = np.asarray(embedding, dtype=np.float32)
         yield {
             "bbox": {
-                "x": int(region.get("x", 0) or 0),
-                "y": int(region.get("y", 0) or 0),
-                "w": int(w),
-                "h": int(h),
+                "x": int(round(int(region.get("x", 0) or 0) * scale)),
+                "y": int(round(int(region.get("y", 0) or 0) * scale)),
+                "w": int(round(w * scale)),
+                "h": int(round(h * scale)),
             },
             "embedding_bytes": vec.tobytes(),
             "dim": int(vec.size),
