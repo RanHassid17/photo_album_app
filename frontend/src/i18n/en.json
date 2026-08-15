@@ -72,7 +72,12 @@
       "lowResWarning": "{{count}} photo(s) are smaller than at least one print size; output will be upscaled.",
       "lowResWarning_one": "{{count}} photo is smaller than at least one print size; output will be upscaled.",
       "lowResOk": "All photos meet print resolution.",
-      "failed": "Export failed: {{message}}"
+      "failed": "Export failed: {{message}}",
+      "recommendHeading": "Print recommendation — based on each photo's size in the album",
+      "recommendItem": "{{count}} × {{size}} cm",
+      "recommendLimited": "{{count}} photos were recommended smaller than the design wanted, due to resolution",
+      "recommendUnprintable": "{{count}} photos are too small to print well at any size",
+      "recommendFolderHint": "In the download, the recommended folder holds one copy of each photo at its recommended size"
     },
     "prevPage": "Previous page",
     "nextPage": "Next page"

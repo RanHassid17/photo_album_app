@@ -72,7 +72,12 @@
       "lowResWarning": "{{count}} תמונות קטנות מגודל הדפסה אחד לפחות — הפלט יוגדל.",
       "lowResWarning_one": "תמונה אחת קטנה מגודל הדפסה אחד לפחות — הפלט יוגדל.",
       "lowResOk": "כל התמונות עומדות ברזולוציה הנדרשת להדפסה.",
-      "failed": "הייצוא נכשל: {{message}}"
+      "failed": "הייצוא נכשל: {{message}}",
+      "recommendHeading": "המלצת הדפסה — לפי גודל התמונה בעיצוב האלבום",
+      "recommendItem": "{{count}} × {{size}} ס״מ",
+      "recommendLimited": "{{count}} תמונות הוקטנו בהמלצה בגלל רזולוציה נמוכה מהנדרש",
+      "recommendUnprintable": "{{count}} תמונות קטנות מדי להדפסה איכותית בכל גודל",
+      "recommendFolderHint": "בקובץ ההורדה, תיקיית recommended מכילה עותק אחד לכל תמונה בגודל המומלץ"
     },
     "prevPage": "העמוד הקודם",
     "nextPage": "העמוד הבא"

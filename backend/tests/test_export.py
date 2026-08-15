@@ -165,7 +165,10 @@ def test_print_zip_has_a_folder_per_size(tmp_path: Path) -> None:
         assert len(manifest["sizes_cm"]) == len(PRINT_SIZES)
         # 4000x3000 fills every size except 30x40 (which needs 4724x3543).
         assert {w["size"] for w in manifest["low_resolution_warnings"]} == {"30x40"}
-        assert manifest["recommended_sizes"][0]["recommended_size"] == "20x30"
+        rec = manifest["recommended_sizes"][0]
+        # Seeded photos sit in small cells, so the layout — not the pixels — decides.
+        assert rec["recommended_size"] == rec["layout_size"]
+        assert rec["max_by_resolution"] == "20x30"
 
 
 def test_print_zip_resizes_to_exact_300dpi_pixels(tmp_path: Path) -> None:
@@ -228,7 +231,10 @@ def test_print_zip_dedupes_repeated_photos(tmp_path: Path) -> None:
 
     with zipfile.ZipFile(io.BytesIO(bundle.data)) as zf:
         image_entries = [n for n in zf.namelist() if n != "manifest.json"]
-        assert len(image_entries) == len(PRINT_SIZES)
+        # One copy per size, plus a single copy in recommended/.
+        recommended = [n for n in image_entries if "/recommended/" in n]
+        assert len(recommended) == 1
+        assert len(image_entries) == len(PRINT_SIZES) + 1
 
 
 # ---------- Quality report ----------
@@ -248,7 +254,9 @@ def test_low_res_warning_flagged_for_small_photos(tmp_path: Path) -> None:
     assert len(report.warnings) == len(PRINT_SIZES)
     assert {w.size_label for w in report.warnings} == {s.label for s in PRINT_SIZES}
     # Nothing is safe to print at 300 DPI.
-    assert report.recommendations[str(list(report.recommendations)[0])] is None
+    assert len(report.advice) == 1
+    assert report.advice[0].recommended_size is None
+    assert report.advice[0].max_by_resolution is None
 
 
 def test_quality_endpoint_returns_warnings(tmp_path: Path) -> None:
@@ -337,3 +345,40 @@ def test_ascii_fallback_keeps_extension_and_never_empties() -> None:
     assert _ascii_fallback("Summer_2024.pdf") == "Summer_2024.pdf"
     assert _ascii_fallback("קיץ 2024 בכרמל-print.zip").endswith(".zip")
     assert _ascii_fallback("קיץ") == "album"
+
+
+def test_recommendation_follows_layout_area_not_just_resolution(tmp_path: Path) -> None:
+    """A hero photo should be recommended for a bigger print than a small one.
+
+    "Largest size the pixels allow" returned 30x40 for every modern photo, which told
+    the user nothing. The album's own design has to drive it.
+    """
+    from app.exporters.print_zip import max_size_for_resolution, size_for_page_area
+
+    # Same enormous source, different prominence on the page.
+    assert size_for_page_area(0.60) == "30x40"
+    assert size_for_page_area(0.32) == "20x30"
+    assert size_for_page_area(0.12) == "13x18"
+    assert size_for_page_area(0.02) == "10x15"
+
+    # Resolution still acts as a ceiling, never a floor.
+    # 10x15 landscape needs 1772x1181; 13x18 needs 2126x1535.
+    assert max_size_for_resolution(1800, 1200) == "10x15"
+
+    album_id = _seed_album(tmp_path, n_photos=1, photo_size=(1800, 1200))
+    db = SessionLocal()
+    try:
+        album = db.get(Album, album_id)
+        assert album is not None
+        item = album.pages[0].items[0]
+        item.position = {"x": 0.05, "y": 0.05, "w": 0.9, "h": 0.9, "rotation_deg": 0.0}
+        db.commit()
+        report = album_quality_report(db, album_id)
+    finally:
+        db.close()
+
+    advice = report.advice[0]
+    assert advice.layout_size == "30x40"          # the design wants a big print
+    assert advice.max_by_resolution == "10x15"    # the pixels do not allow it
+    assert advice.recommended_size == "10x15"     # ceiling wins
+    assert advice.limited_by_resolution is True

@@ -16,9 +16,15 @@ class LowResWarning(BaseModel):
 
 class SizeRecommendation(BaseModel):
     photo_id: str
-    # Largest standard print size the original fills at a true 300 DPI. None means even
-    # the smallest size would require upscaling.
+    # What to print: the size the album layout calls for, capped by what the pixels
+    # support. None means even the smallest size would require upscaling.
     recommended_size: str | None
+    # What the photo's prominence in the album alone would call for.
+    layout_size: str
+    # Largest size the original fills at a true 300 DPI.
+    max_by_resolution: str | None
+    # True when the pixels, not the design, decided the recommendation.
+    limited_by_resolution: bool
 
 
 class ExportQualityResponse(BaseModel):

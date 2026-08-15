@@ -4,6 +4,7 @@ import io
 import json
 import logging
 import zipfile
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -59,12 +60,38 @@ class QualityWarning:
     required_h: int
 
 
+# How much of a page a photo covers -> the print size that matches its role in the album.
+# Recommending "the largest size the pixels allow" returned 30x40 for every photo in a
+# modern camera library, which is not a recommendation. What the album designer gave a
+# photo half a page for deserves a bigger print than something in a corner cell.
+_AREA_TIERS: tuple[tuple[float, str], ...] = (
+    (0.45, "30x40"),
+    (0.30, "20x30"),
+    (0.18, "15x21"),
+    (0.10, "13x18"),
+    (0.0, "10x15"),
+)
+
+
+@dataclass(slots=True)
+class SizeAdvice:
+    photo_id: str
+    # What we actually suggest printing: the layout's ambition, capped by the pixels.
+    recommended_size: str | None
+    # What the photo's prominence in the album alone would call for.
+    layout_size: str
+    # Largest size the original fills at a true 300 DPI (None = too small even for 10x15).
+    max_by_resolution: str | None
+
+    @property
+    def limited_by_resolution(self) -> bool:
+        return self.recommended_size != self.layout_size
+
+
 @dataclass(slots=True)
 class QualityReport:
     warnings: list[QualityWarning]
-    # photo_id -> largest size label the original can fill at 300 DPI (None if even the
-    # smallest size would be upscaled).
-    recommendations: dict[str, str | None] = field(default_factory=dict)
+    advice: list[SizeAdvice] = field(default_factory=list)
 
     def to_jsonable(self) -> list[dict]:
         return [
@@ -81,8 +108,14 @@ class QualityReport:
 
     def recommendations_jsonable(self) -> list[dict]:
         return [
-            {"photo_id": pid, "recommended_size": label}
-            for pid, label in sorted(self.recommendations.items())
+            {
+                "photo_id": a.photo_id,
+                "recommended_size": a.recommended_size,
+                "layout_size": a.layout_size,
+                "max_by_resolution": a.max_by_resolution,
+                "limited_by_resolution": a.limited_by_resolution,
+            }
+            for a in sorted(self.advice, key=lambda a: a.photo_id)
         ]
 
 
@@ -99,12 +132,23 @@ def _target_dims_for_orientation(photo_w: int, photo_h: int, size: PrintSize) ->
     return size.height_px, size.width_px
 
 
-def recommended_size(photo_w: int, photo_h: int) -> str | None:
-    """Largest print size this photo can fill at a true 300 DPI without upscaling.
+def _size_index(label: str) -> int:
+    for i, size in enumerate(PRINT_SIZES):
+        if size.label == label:
+            return i
+    return 0
 
-    The data for this was already being computed for the low-resolution warnings and
-    then discarded; it is the answer to "what size should I actually print this at?".
-    """
+
+def size_for_page_area(area_fraction: float) -> str:
+    """Print size implied by how much of its page a photo occupies."""
+    for threshold, label in _AREA_TIERS:
+        if area_fraction >= threshold:
+            return label
+    return PRINT_SIZES[0].label
+
+
+def max_size_for_resolution(photo_w: int, photo_h: int) -> str | None:
+    """Largest print size this photo can fill at a true 300 DPI without upscaling."""
     best: str | None = None
     for size in PRINT_SIZES:
         target_w, target_h = _target_dims_for_orientation(photo_w, photo_h, size)
@@ -116,16 +160,37 @@ def recommended_size(photo_w: int, photo_h: int) -> str | None:
 def quality_report(album: Album, photos: list[Photo]) -> QualityReport:
     """Flag every (photo, size) pair where the original is smaller than the print target."""
     warnings: list[QualityWarning] = []
-    recommendations: dict[str, str | None] = {}
+    advice: list[SizeAdvice] = []
     seen: set[tuple[str, str]] = set()
 
     photos_by_id = {p.id: p for p in photos}
+    areas = {pid: area for pid, _, _, area in _collect_placements(album)}
+    advised: set[uuid.UUID] = set()
+
     for page in album.pages:
         for item in page.items:
             photo = photos_by_id.get(item.photo_id)
             if photo is None or photo.width is None or photo.height is None:
                 continue
-            recommendations[str(photo.id)] = recommended_size(photo.width, photo.height)
+            if photo.id not in advised:
+                advised.add(photo.id)
+                layout_size = size_for_page_area(areas.get(photo.id, 0.0))
+                max_res = max_size_for_resolution(photo.width, photo.height)
+                recommended = (
+                    None
+                    if max_res is None
+                    else PRINT_SIZES[
+                        min(_size_index(layout_size), _size_index(max_res))
+                    ].label
+                )
+                advice.append(
+                    SizeAdvice(
+                        photo_id=str(photo.id),
+                        recommended_size=recommended,
+                        layout_size=layout_size,
+                        max_by_resolution=max_res,
+                    )
+                )
             for size in PRINT_SIZES:
                 key = (str(photo.id), size.label)
                 if key in seen:
@@ -146,7 +211,7 @@ def quality_report(album: Album, photos: list[Photo]) -> QualityReport:
                     )
                     seen.add(key)
 
-    return QualityReport(warnings=warnings, recommendations=recommendations)
+    return QualityReport(warnings=warnings, advice=advice)
 
 
 def _resize_for_print(src: Image.Image, target_w: int, target_h: int) -> Image.Image:
@@ -171,13 +236,16 @@ def _safe_component(name: str | None, fallback: str) -> str:
 
 
 def _collect_placements(album: Album) -> list[tuple]:
-    """First (photo_id, page_index, position_index) for each unique photo, in album order."""
+    """First (photo_id, page_index, position_index, page_area) per unique photo."""
     seen: dict = {}
     for page in sorted(album.pages, key=lambda p: p.index):
         for item in sorted(page.items, key=lambda it: it.position_index):
-            if item.photo_id not in seen:
-                seen[item.photo_id] = (page.index, item.position_index)
-    return [(pid, pg, pos) for pid, (pg, pos) in seen.items()]
+            if item.photo_id in seen:
+                continue
+            pos = item.position or {}
+            area = float(pos.get("w") or 0.0) * float(pos.get("h") or 0.0)
+            seen[item.photo_id] = (page.index, item.position_index, area)
+    return [(pid, pg, ix, area) for pid, (pg, ix, area) in seen.items()]
 
 
 def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
@@ -187,6 +255,7 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
         <album>/10x15/<album>_p1_1.jpg
         <album>/13x18/<album>_p1_1.jpg
         ...
+        <album>/recommended/<album>_p1_1_20x30.jpg   <- one per photo
         manifest.json
 
     Filenames previously carried only a bare photo UUID, so a downloaded folder gave no
@@ -197,10 +266,11 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
     album_slug = _safe_component(album.name, f"album-{album.id}")
 
     quality = quality_report(album, photos)
+    advice_by_photo = {a.photo_id: a for a in quality.advice}
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for photo_id, page_index, position_index in placements:
+        for photo_id, page_index, position_index, _area in placements:
             photo = photos_by_id.get(photo_id)
             if photo is None:
                 continue
@@ -213,6 +283,7 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
                 src = raw.convert("RGB")
             try:
                 stem = f"{album_slug}_p{page_index + 1}_{position_index + 1}"
+                advice = advice_by_photo.get(str(photo.id))
                 for size in PRINT_SIZES:
                     target_w, target_h = _target_dims_for_orientation(
                         src.width, src.height, size
@@ -226,9 +297,15 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
                             quality=_JPEG_QUALITY,
                             dpi=(PRINT_DPI, PRINT_DPI),
                         )
-                        zf.writestr(
-                            f"{album_slug}/{size.label}/{stem}.jpg", page_buf.getvalue()
-                        )
+                        data = page_buf.getvalue()
+                        zf.writestr(f"{album_slug}/{size.label}/{stem}.jpg", data)
+                        # Every photo at every size answers "give me all the options".
+                        # `recommended/` answers "tell me what to print" — one file per
+                        # photo, at the size the album's own design calls for.
+                        if advice is not None and advice.recommended_size == size.label:
+                            zf.writestr(
+                                f"{album_slug}/recommended/{stem}_{size.label}.jpg", data
+                            )
                     finally:
                         resized.close()
             finally:

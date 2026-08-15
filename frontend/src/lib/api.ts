@@ -261,9 +261,20 @@ export interface LowResWarning {
   required_h: number;
 }
 
+export interface SizeRecommendation {
+  photo_id: string;
+  /** What to print: the layout's ambition, capped by the pixels. */
+  recommended_size: string | null;
+  /** What the photo's prominence in the album alone calls for. */
+  layout_size: string;
+  max_by_resolution: string | null;
+  limited_by_resolution: boolean;
+}
+
 export interface ExportQualityResponse {
   album_id: string;
   low_resolution_warnings: LowResWarning[];
+  recommended_sizes: SizeRecommendation[];
 }
 
 export async function fetchExportQuality(albumId: string): Promise<ExportQualityResponse> {
