@@ -5,9 +5,9 @@ from pathlib import Path
 
 from app.sources.base import IngestCandidate, PhotoSource
 
-IMAGE_SUFFIXES = frozenset(
-    {".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tif", ".tiff", ".bmp", ".gif"}
-)
+# Single source of truth — RAW (.CR3 etc.) was missing, so a Canon library ingested
+# zero files while appearing to succeed.
+from app.services.imaging import SUPPORTED_SUFFIXES as IMAGE_SUFFIXES  # noqa: E402
 
 
 class LocalFolderSource(PhotoSource):

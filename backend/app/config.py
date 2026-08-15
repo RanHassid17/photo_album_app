@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://album:album@localhost:5432/album"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Vision model tiers. Heavier = more accurate and much slower; on a CPU-only
+    # machine this is the main lever for indexing time.
+    #   faces:     Facenet512 (best) | Facenet | ArcFace   -- ArcFace weights are
+    #              research-only upstream, so it is not the default
+    #   detector:  mtcnn (best) | opencv (fastest) | ssd | mediapipe
+    #   yolo:      yolov8n.pt (fastest) | yolov8s.pt | yolov8m.pt (slow on CPU)
+    vision_face_model: str = "Facenet512"
+    vision_face_detector: str = "mtcnn"
+    vision_yolo_weights: str = "yolov8s.pt"
+
     photo_storage_dir: Path = Path("./photo_storage")
     export_dir: Path = Path("./exports")
 

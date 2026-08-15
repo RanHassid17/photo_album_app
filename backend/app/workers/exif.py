@@ -5,7 +5,8 @@ from datetime import datetime
 from pathlib import Path
 
 import exifread
-from PIL import Image
+
+from app.services.imaging import open_image
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,7 +64,7 @@ def extract_exif_metadata(path: Path) -> PhotoMetadata:
     width: int | None = None
     height: int | None = None
     try:
-        with Image.open(path) as img:
+        with open_image(path) as img:
             width, height = img.size
     except Exception:  # noqa: BLE001
         pass

@@ -69,7 +69,12 @@ def test_layout_rejects_repeated_photo(monkeypatch) -> None:
         call_layout_agent(meta, page_count=1, style=AlbumStyle.MODERN)
 
 
-def test_layout_rejects_omitted_photo(monkeypatch) -> None:
+def test_layout_absorbs_omitted_photo_instead_of_rejecting(monkeypatch) -> None:
+    """A dropped photo is added back, not treated as a broken layout.
+
+    Observed in the running app: the agent laid out 11 of 12 photos. Rejecting threw
+    away 11 good placements over one miss and told the user the AI was unavailable.
+    """
     meta = _metadata(3)
     payload = {
         "pages": [
@@ -84,7 +89,40 @@ def test_layout_rejects_omitted_photo(monkeypatch) -> None:
     }
     _install_fake_claude(monkeypatch, layout_agent, payload)
 
-    with pytest.raises(LayoutAgentError, match="omits"):
+    plan = call_layout_agent(meta, page_count=1, style=AlbumStyle.MODERN)
+
+    placed = {str(it.photo_id) for pg in plan.pages for it in pg.items}
+    assert placed == {m["photo_id"] for m in meta}          # nothing dropped
+    assert len(placed) == 3                                  # and nothing duplicated
+
+    # The repaired page must still be a usable layout.
+    boxes = [(i.position.x, i.position.y, i.position.w, i.position.h)
+             for pg in plan.pages for i in pg.items]
+    for x, y, w, h in boxes:
+        assert x + w <= 1.0 + 1e-9 and y + h <= 1.0 + 1e-9
+
+
+def test_layout_still_rejects_duplicates_after_repair_exists(monkeypatch) -> None:
+    """Repairing omissions must not soften the duplicate rule.
+
+    A photo placed twice is unrecoverable — we cannot know which copy was intended.
+    """
+    meta = _metadata(3)
+    dup = meta[0]["photo_id"]
+    payload = {
+        "pages": [
+            {
+                "grid": {"rows": 1, "cols": 2, "gap": 0.02},
+                "items": [
+                    {"photo_id": dup, "position": _position(0)},
+                    {"photo_id": dup, "position": _position(1)},
+                ],
+            }
+        ]
+    }
+    _install_fake_claude(monkeypatch, layout_agent, payload)
+
+    with pytest.raises(LayoutAgentError, match="more than once"):
         call_layout_agent(meta, page_count=1, style=AlbumStyle.MODERN)
 
 

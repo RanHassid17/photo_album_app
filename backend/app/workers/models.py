@@ -17,6 +17,8 @@ from typing import Any
 import certifi
 import numpy as np
 
+from app.services.imaging import readable_path
+
 # macOS Python.org distros ship without a trusted root bundle; YOLO weight
 # downloads fail with SSL_CERTIFICATE_VERIFY_FAILED. Point urllib/requests at
 # certifi's bundle if no system CA path is already set.
@@ -59,13 +61,26 @@ _YOLO_LABEL_CONF_THRESHOLD = 0.35
 # Both are MIT. ArcFace and RetinaFace would be marginally stronger but their upstream
 # InsightFace weights are published for non-commercial research only, so they are
 # deliberately avoided here.
-_DEEPFACE_MODEL = "Facenet512"  # 512-d embeddings.
-_DEEPFACE_DETECTOR = "mtcnn"
-_FACE_EMBEDDING_DIM = 512
+# Defaults, overridable per machine via .env — this project's reference machine is a
+# 2020 Intel MacBook with no GPU (no CUDA, and MPS needs Apple Silicon), so everything
+# runs on four CPU cores. Accuracy and indexing time trade directly against each other
+# and the right point depends on the hardware, so it is configuration, not a constant.
+_DEFAULT_FACE_MODEL = "Facenet512"  # 512-d embeddings.
+_DEFAULT_FACE_DETECTOR = "mtcnn"
 
-# NOTE: ultralytics is AGPL-3.0 — the only copyleft dependency in the project. It applies
-# equally to yolov8n and yolov8s, so this upgrade changes nothing about the obligation.
-_YOLO_WEIGHTS = "yolov8s.pt"
+
+def _vision_settings() -> tuple[str, str, str]:
+    from app.config import get_settings
+
+    s = get_settings()
+    return (
+        getattr(s, "vision_face_model", _DEFAULT_FACE_MODEL),
+        getattr(s, "vision_face_detector", _DEFAULT_FACE_DETECTOR),
+        getattr(s, "vision_yolo_weights", "yolov8s.pt"),
+    )
+
+# NOTE: ultralytics is AGPL-3.0 — the only copyleft dependency in the project. The
+# obligation is identical for every weight file, so the tier is purely a speed choice.
 
 _yolo_model = None
 _yolo_lock = threading.Lock()
@@ -77,7 +92,7 @@ def _get_yolo():
         if _yolo_model is None:
             from ultralytics import YOLO
 
-            _yolo_model = YOLO(_YOLO_WEIGHTS)
+            _yolo_model = YOLO(_vision_settings()[2])
     return _yolo_model
 
 
@@ -85,14 +100,18 @@ def face_embeddings(path: Path) -> Iterator[dict[str, Any]]:
     """Yield {'bbox': {...}, 'embedding_bytes': bytes, 'dim': int} per detected face."""
     from deepface import DeepFace
 
+    model_name, detector, _ = _vision_settings()
     try:
-        results = DeepFace.represent(
-            img_path=str(path),
-            model_name=_DEEPFACE_MODEL,
-            detector_backend=_DEEPFACE_DETECTOR,
-            enforce_detection=False,
-            align=True,
-        )
+        # HEIC and RAW are transcoded to a temporary JPEG first: DeepFace opens the path
+        # itself and understands neither.
+        with readable_path(path) as readable:
+            results = DeepFace.represent(
+                img_path=str(readable),
+                model_name=model_name,
+                detector_backend=detector,
+                enforce_detection=False,
+                align=True,
+            )
     except Exception as exc:  # noqa: BLE001
         log.warning("DeepFace.represent failed for %s: %s", path, exc)
         return
@@ -124,7 +143,10 @@ def face_embeddings(path: Path) -> Iterator[dict[str, Any]]:
 def label_objects(path: Path) -> Iterator[tuple[str, float]]:
     """Yield (label, confidence) for objects YOLOv8 detected, filtered to ALLOWED_LABELS."""
     model = _get_yolo()
-    results = model.predict(source=str(path), verbose=False, conf=_YOLO_LABEL_CONF_THRESHOLD)
+    with readable_path(path) as readable:
+        results = model.predict(
+            source=str(readable), verbose=False, conf=_YOLO_LABEL_CONF_THRESHOLD
+        )
     # Keep best confidence per label.
     best: dict[str, float] = {}
     for r in results:

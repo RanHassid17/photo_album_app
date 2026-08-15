@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from app.models import Album, Photo
+from app.services.imaging import open_image
 
 log = logging.getLogger(__name__)
 
@@ -255,7 +256,7 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
         <album>/10x15/<album>_p1_1.jpg
         <album>/13x18/<album>_p1_1.jpg
         ...
-        <album>/recommended/<album>_p1_1_20x30.jpg   <- one per photo
+        <album>/recommended/20x30/<album>_p1_1.jpg   <- one per photo, by size
         manifest.json
 
     Filenames previously carried only a bare photo UUID, so a downloaded folder gave no
@@ -278,7 +279,7 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
             if not src_path.exists():
                 log.warning("skipping missing print source %s", src_path)
                 continue
-            with Image.open(src_path) as raw:
+            with open_image(src_path) as raw:
                 raw.load()
                 src = raw.convert("RGB")
             try:
@@ -304,7 +305,7 @@ def build_print_zip(album: Album, photos: list[Photo]) -> bytes:
                         # photo, at the size the album's own design calls for.
                         if advice is not None and advice.recommended_size == size.label:
                             zf.writestr(
-                                f"{album_slug}/recommended/{stem}_{size.label}.jpg", data
+                                f"{album_slug}/recommended/{size.label}/{stem}.jpg", data
                             )
                     finally:
                         resized.close()

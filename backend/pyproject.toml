@@ -5,6 +5,10 @@ description = "Photo Album Creator backend"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi>=0.115",
+  # HEIC (every modern iPhone) and camera RAW (.CR3 etc.) are not readable by Pillow
+  # alone; without these a Canon or iPhone library is invisible to the app.
+  "pillow-heif>=0.18",
+  "rawpy>=0.22",
   "uvicorn[standard]>=0.32",
   "pydantic>=2.9",
   "pydantic-settings>=2.5",

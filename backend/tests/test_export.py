@@ -157,7 +157,12 @@ def test_print_zip_has_a_folder_per_size(tmp_path: Path) -> None:
         names = zf.namelist()
         for size in PRINT_SIZES:
             # Paths are now <album>/<size>/<album>_p<page>_<pos>.jpg per prompt spec §14.
-            assert sum(1 for n in names if f"/{size.label}/" in n) == 2
+            # recommended/<size>/ also contains the label, so exclude it here.
+            per_size = [
+                n for n in names
+                if f"/{size.label}/" in n and "/recommended/" not in n
+            ]
+            assert len(per_size) == 2
         assert "manifest.json" in names
 
         manifest = json.loads(zf.read("manifest.json"))

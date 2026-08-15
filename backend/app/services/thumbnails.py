@@ -9,6 +9,7 @@ from pathlib import Path
 from PIL import Image, ImageOps
 
 from app.config import get_settings
+from app.services.imaging import open_image
 
 log = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ def get_or_create_thumbnail(photo_id: uuid.UUID, source_path: Path) -> Path:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(target.suffix + f".tmp.{os.getpid()}")
         try:
-            with Image.open(source_path) as img:
+            with open_image(source_path) as img:
                 img = ImageOps.exif_transpose(img)  # respect EXIF orientation
                 if img.mode not in ("RGB", "RGBA"):
                     img = img.convert("RGB")

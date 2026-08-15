@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 from app.models import Album, AlbumItem, AlbumStyle, CommentPosition, Photo
+from app.services.imaging import open_image
 
 log = logging.getLogger(__name__)
 
@@ -119,8 +120,7 @@ def _open_photo(photo: Photo) -> Image.Image:
     path = Path(photo.stored_path)
     if not path.exists():
         raise PdfExportError(f"photo file missing on disk: {path}")
-    img = Image.open(path)
-    img.load()
+    img = open_image(path)
     if img.mode not in ("RGB", "RGBA"):
         img = img.convert("RGB")
     return img

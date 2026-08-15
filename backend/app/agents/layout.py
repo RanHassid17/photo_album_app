@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import uuid
 from typing import Any
 
@@ -10,8 +11,14 @@ from pydantic import ValidationError
 
 from app.agents.prompts import LAYOUT_SYSTEM, LAYOUT_TOOL_SCHEMA
 from app.config import get_settings
-from app.models import AlbumStyle
-from app.schemas.layouts import LayoutPlan, LayoutPosition
+from app.models import AlbumStyle, CommentPosition
+from app.schemas.layouts import (
+    LayoutGrid,
+    LayoutItem,
+    LayoutPage,
+    LayoutPlan,
+    LayoutPosition,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,11 +96,18 @@ def call_layout_agent(
                 raise LayoutAgentError(f"layout places photo {item.photo_id} more than once")
             placed.add(item.photo_id)
 
+    # A dropped photo is repaired, not rejected. Observed in practice: the agent laid
+    # out 11 of 12 photos, and throwing the plan away lost 11 good placements over one
+    # miss -- the user just saw "the AI was unavailable". Only a photo placed *twice* is
+    # unrecoverable, because we cannot know which copy was intended.
     missing = valid_ids - placed
     if missing:
-        raise LayoutAgentError(
-            f"layout omits {len(missing)} of {len(valid_ids)} input photos"
+        log.info(
+            "layout omitted %d of %d photos; absorbing them into the emptiest page",
+            len(missing),
+            len(valid_ids),
         )
+        _absorb_missing(parsed, sorted(missing, key=str))
 
     # Geometry is REPAIRED, not rejected. Asking the agent for varied, free-form boxes
     # (rather than fixed grid cells) means small arithmetic slips are routine; throwing
@@ -123,6 +137,57 @@ def call_layout_agent(
 
 # Fraction of the smaller box that may be covered before a layout counts as broken.
 _MAX_OVERLAP_FRACTION = 0.2
+
+
+def _grid_boxes(n: int, gap: float = 0.025) -> list[LayoutPosition]:
+    """Evenly spaced cells for `n` photos, filling row by row."""
+    cols = 1 if n <= 1 else 2 if n <= 4 else 3
+    rows = math.ceil(n / cols)
+    cell_w = (1.0 - gap * (cols + 1)) / cols
+    cell_h = (1.0 - gap * (rows + 1)) / rows
+    out: list[LayoutPosition] = []
+    for i in range(n):
+        r, c = divmod(i, cols)
+        out.append(
+            LayoutPosition(
+                x=gap + c * (cell_w + gap),
+                y=gap + r * (cell_h + gap),
+                w=cell_w,
+                h=cell_h,
+            )
+        )
+    return out
+
+
+def _absorb_missing(plan: LayoutPlan, missing: list[uuid.UUID]) -> None:
+    """Add dropped photos to the emptiest page, re-flowing just that page to a grid.
+
+    Every other page keeps the agent's design; only the page that has to grow is
+    recomputed, and a uniform grid guarantees the additions cannot overlap.
+    """
+    if not plan.pages:
+        plan.pages.append(LayoutPage(grid=LayoutGrid(rows=1, cols=1), items=[]))
+
+    target = min(plan.pages, key=lambda pg: len(pg.items))
+    kept = list(target.items)
+    photo_ids = [it.photo_id for it in kept] + list(missing)
+
+    boxes = _grid_boxes(len(photo_ids))
+    emphasis_by_id = {it.photo_id: it.emphasis for it in kept}
+    comment_by_id = {it.photo_id: (it.comment, it.comment_position) for it in kept}
+
+    target.items = [
+        LayoutItem(
+            photo_id=pid,
+            position=boxes[i],
+            emphasis=emphasis_by_id.get(pid, "normal"),
+            comment=comment_by_id.get(pid, (None, CommentPosition.NONE))[0],
+            comment_position=comment_by_id.get(pid, (None, CommentPosition.NONE))[1],
+        )
+        for i, pid in enumerate(photo_ids)
+    ]
+    cols = 1 if len(photo_ids) <= 1 else 2 if len(photo_ids) <= 4 else 3
+    target.grid = LayoutGrid(rows=math.ceil(len(photo_ids) / cols), cols=cols, gap=0.025)
 
 
 def _clamp_into_page(pos: LayoutPosition) -> None:
