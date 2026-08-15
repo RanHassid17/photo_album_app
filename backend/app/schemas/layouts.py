@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -24,6 +24,9 @@ class LayoutPosition(BaseModel):
 class LayoutItem(BaseModel):
     photo_id: uuid.UUID
     position: LayoutPosition
+    # 'hero' marks the dominant photo on a page. Persisted inside the position JSONB so
+    # the renderer can treat it specially without a schema migration.
+    emphasis: Literal["hero", "normal"] = "normal"
     comment: Annotated[str | None, Field(default=None, max_length=200)] = None
     comment_position: CommentPosition = CommentPosition.NONE
 

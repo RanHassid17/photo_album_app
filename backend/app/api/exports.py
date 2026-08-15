@@ -8,7 +8,11 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.schemas.exports import ExportQualityResponse, LowResWarning
+from app.schemas.exports import (
+    ExportQualityResponse,
+    LowResWarning,
+    SizeRecommendation,
+)
 from app.services.export import (
     AlbumNotFoundError,
     album_quality_report,
@@ -33,6 +37,9 @@ def get_quality(album_id: uuid.UUID, db: Session = Depends(get_db)) -> ExportQua
     return ExportQualityResponse(
         album_id=album_id,
         low_resolution_warnings=[LowResWarning(**w) for w in report.to_jsonable()],
+        recommended_sizes=[
+            SizeRecommendation(**r) for r in report.recommendations_jsonable()
+        ],
     )
 
 

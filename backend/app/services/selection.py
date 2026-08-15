@@ -58,15 +58,31 @@ def build_photo_metadata(db: Session, photo_ids: list[uuid.UUID]) -> list[dict[s
 
     out: list[dict[str, Any]] = []
     for p in photos:
-        out.append(
-            {
-                "photo_id": str(p.id),
-                "taken_at": p.taken_at.isoformat() if p.taken_at else None,
-                "persons": faces_by_photo.get(p.id, []),
-                "labels": labels_by_photo.get(p.id, []),
-                "blur_score": p.blur_score,
-            }
-        )
+        entry: dict[str, Any] = {
+            "photo_id": str(p.id),
+            "taken_at": p.taken_at.isoformat() if p.taken_at else None,
+            "persons": faces_by_photo.get(p.id, []),
+            "labels": labels_by_photo.get(p.id, []),
+            "blur_score": p.blur_score,
+        }
+        # Geometry. The Layout Agent cannot compose a page without knowing which photos
+        # are landscape and which are portrait -- prompt spec §14 Agent 3 lists
+        # orientation and aspect ratio as required inputs, but they were never sent, so
+        # every layout came back as uniform cells. Six short scalars per photo keeps the
+        # payload well inside the documented ~32K input-token budget.
+        if p.width and p.height:
+            entry["width"] = p.width
+            entry["height"] = p.height
+            entry["aspect_ratio"] = round(p.width / p.height, 3)
+            entry["orientation"] = (
+                "landscape"
+                if p.width > p.height
+                else "portrait"
+                if p.height > p.width
+                else "square"
+            )
+            entry["megapixels"] = round(p.width * p.height / 1_000_000, 1)
+        out.append(entry)
     return out
 
 

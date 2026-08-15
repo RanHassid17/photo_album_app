@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.exporters.print_zip import PRINT_SIZES
 from app.main import app
 
 client = TestClient(app)
@@ -120,8 +121,9 @@ def test_full_mvp_flow_ingest_to_export(
     with zipfile.ZipFile(io.BytesIO(zip_r.content)) as zf:
         names = zf.namelist()
         assert "manifest.json" in names
-        # 3 unique picked photos × 3 sizes = 9 image entries.
+        # 3 unique picked photos × every standard print size.
         image_entries = [n for n in names if n != "manifest.json"]
-        assert len(image_entries) == 9
-        for size_label in ("10x15", "13x18", "20x30"):
-            assert sum(1 for n in image_entries if n.startswith(f"{size_label}/")) == 3
+        assert len(image_entries) == 3 * len(PRINT_SIZES)
+        for size in PRINT_SIZES:
+            # <album>/<size>/<album>_p<page>_<pos>.jpg — prompt spec §14 Agent 5.
+            assert sum(1 for n in image_entries if f"/{size.label}/" in n) == 3

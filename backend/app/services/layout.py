@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import math
 import uuid
 from dataclasses import dataclass
 
@@ -40,6 +39,30 @@ _GRID_FOR_COUNT: list[tuple[int, int, int]] = [
     (9, 3, 3),
 ]
 
+# Golden-ratio split used for hero pages -- prompt spec §14 Agent 3 calls for a
+# golden-ratio layout engine, and it is what stops every page looking like a grid.
+_HERO_RATIO = 0.618
+
+# How many photos each style wants per page, as a repeating cycle. The cycle is scaled
+# to the real photo count, so what it actually encodes is *relative* density: the album
+# alternates between sparse feature pages and busier ones instead of dividing evenly.
+_STYLE_DENSITY: dict[AlbumStyle, tuple[int, ...]] = {
+    AlbumStyle.MODERN: (1, 4, 2, 6, 3),
+    AlbumStyle.CLASSIC: (1, 3, 2, 2),
+    AlbumStyle.KIDS: (4, 6, 3, 6),
+    AlbumStyle.ROMANTIC: (2, 1, 3, 2),
+    AlbumStyle.MINIMALIST: (1, 2, 1, 3),
+}
+
+# Page margin per style, as a fraction of the page. Bigger margin = calmer page.
+_STYLE_GAP: dict[AlbumStyle, float] = {
+    AlbumStyle.MODERN: 0.025,
+    AlbumStyle.CLASSIC: 0.045,
+    AlbumStyle.KIDS: 0.018,
+    AlbumStyle.ROMANTIC: 0.040,
+    AlbumStyle.MINIMALIST: 0.060,
+}
+
 
 def _grid_for_count(n: int) -> tuple[int, int]:
     for max_n, rows, cols in _GRID_FOR_COUNT:
@@ -65,43 +88,112 @@ def _grid_positions(rows: int, cols: int, gap: float) -> list[LayoutPosition]:
     return out
 
 
+def _hero_positions(n: int, gap: float) -> list[LayoutPosition]:
+    """One dominant photo beside a column of smaller ones.
+
+    The first position is the hero and is deliberately several times the area of the
+    others: an album where every photo is the same size reads as a contact sheet, not a
+    designed page.
+    """
+    if n <= 1:
+        return [LayoutPosition(x=gap, y=gap, w=1.0 - 2 * gap, h=1.0 - 2 * gap)]
+
+    hero_w = _HERO_RATIO - 1.5 * gap
+    hero = LayoutPosition(x=gap, y=gap, w=hero_w, h=1.0 - 2 * gap)
+
+    col_x = gap + hero_w + gap
+    col_w = 1.0 - col_x - gap
+    rest = n - 1
+    cell_h = (1.0 - gap * (rest + 1)) / rest
+
+    out = [hero]
+    for i in range(rest):
+        out.append(
+            LayoutPosition(x=col_x, y=gap + i * (cell_h + gap), w=col_w, h=cell_h)
+        )
+    return out
+
+
+def _page_densities(total: int, page_count: int, style: AlbumStyle) -> list[int]:
+    """Split `total` photos across `page_count` pages using the style's density cycle.
+
+    Replaces the previous `ceil(total / page_count)` even split, which guaranteed that
+    every page held the same number of photos no matter the style or the material.
+    """
+    cycle = _STYLE_DENSITY.get(style, _STYLE_DENSITY[AlbumStyle.MODERN])
+    raw = [cycle[i % len(cycle)] for i in range(page_count)]
+
+    scale = total / sum(raw)
+    counts = [max(1, round(r * scale)) for r in raw]
+
+    # Rounding and the min-1 floor drift off the target; settle the difference by
+    # walking the pages, densest first when removing so feature pages stay sparse.
+    drift = total - sum(counts)
+    guard = 0
+    while drift != 0 and guard < 10_000:
+        guard += 1
+        if drift > 0:
+            idx = max(range(page_count), key=lambda i: counts[i])
+            counts[idx] += 1
+            drift -= 1
+        else:
+            idx = max(range(page_count), key=lambda i: counts[i])
+            if counts[idx] > 1:
+                counts[idx] -= 1
+                drift += 1
+            else:
+                break
+    return counts
+
+
 def deterministic_layout(
-    photo_ids: list[uuid.UUID], page_count: int
+    photo_ids: list[uuid.UUID],
+    page_count: int,
+    style: AlbumStyle = AlbumStyle.MODERN,
 ) -> LayoutPlan:
-    """Distribute photos across `page_count` simple grids."""
+    """Distribute photos across pages with style-driven density and hero sizing."""
     if not photo_ids or page_count <= 0:
         return LayoutPlan(pages=[])
 
     page_count = min(page_count, len(photo_ids))
-    per_page = math.ceil(len(photo_ids) / page_count)
-    rows, cols = _grid_for_count(per_page)
+    gap = _STYLE_GAP.get(style, 0.025)
+    densities = _page_densities(len(photo_ids), page_count, style)
 
     pages: list[LayoutPage] = []
     idx = 0
-    for _ in range(page_count):
-        slice_end = min(idx + per_page, len(photo_ids))
+    for page_index, want in enumerate(densities):
+        slice_end = min(idx + want, len(photo_ids))
         page_photos = photo_ids[idx:slice_end]
         idx = slice_end
         if not page_photos:
             break
-        # If the last page has fewer photos, tighten the grid to fit.
-        actual_rows, actual_cols = _grid_for_count(len(page_photos))
-        gap = 0.02
-        positions = _grid_positions(actual_rows, actual_cols, gap)
+
+        n = len(page_photos)
+        # Alternate hero pages with grid pages so the album has a rhythm. Photos arrive
+        # in selection-score order, so the first of each slice is the strongest and
+        # earns the hero slot.
+        use_hero = n == 1 or (page_index % 2 == 0 and n >= 2)
+        if use_hero:
+            positions = _hero_positions(n, gap)
+            # Describes the hero + stacked column; LayoutGrid caps rows at 6, so a
+            # dense hero page reports the cap rather than failing validation.
+            rows, cols = (1, 1) if n == 1 else (min(6, n - 1), 2)
+        else:
+            rows, cols = _grid_for_count(n)
+            positions = _grid_positions(rows, cols, gap)
+
         items = [
             LayoutItem(
                 photo_id=pid,
                 position=positions[i],
+                emphasis="hero" if (use_hero and i == 0 and n > 1) else "normal",
                 comment=None,
                 comment_position=CommentPosition.NONE,
             )
             for i, pid in enumerate(page_photos)
         ]
         pages.append(
-            LayoutPage(
-                grid=LayoutGrid(rows=actual_rows, cols=actual_cols, gap=gap),
-                items=items,
-            )
+            LayoutPage(grid=LayoutGrid(rows=rows, cols=cols, gap=gap), items=items)
         )
 
     return LayoutPlan(pages=pages)
@@ -127,11 +219,11 @@ def suggest_layout(
         plan = call_layout_agent(metadata, page_count, style)
     except LayoutAgentError as exc:
         log.warning("layout agent failed, using deterministic fallback: %s", exc)
-        plan = deterministic_layout(photo_ids, page_count)
+        plan = deterministic_layout(photo_ids, page_count, style)
         used_fallback = True
 
     if not plan.pages:
-        plan = deterministic_layout(photo_ids, page_count)
+        plan = deterministic_layout(photo_ids, page_count, style)
         used_fallback = True
 
     album = Album(
@@ -152,6 +244,7 @@ def suggest_layout(
                 "rows": page.grid.rows,
                 "cols": page.grid.cols,
                 "gap": page.grid.gap,
+                "style": style.value,
             },
         )
         db.add(ap)
@@ -168,6 +261,7 @@ def suggest_layout(
                         "w": item.position.w,
                         "h": item.position.h,
                         "rotation_deg": item.position.rotation_deg,
+                        "emphasis": item.emphasis,
                     },
                     comment=item.comment,
                     comment_position=item.comment_position,

@@ -95,4 +95,29 @@ def call_layout_agent(
             f"layout omits {len(missing)} of {len(valid_ids)} input photos"
         )
 
+    # The prompt now asks for varied, non-uniform boxes rather than a fixed grid, which
+    # makes overlapping and off-page boxes far more likely than they were with fixed
+    # cells. A small tolerance absorbs the agent's rounding.
+    tol = 0.005
+    for page_no, page in enumerate(parsed.pages):
+        boxes = [
+            (it.position.x, it.position.y, it.position.w, it.position.h)
+            for it in page.items
+        ]
+        for x, y, w, h in boxes:
+            if x + w > 1.0 + tol or y + h > 1.0 + tol:
+                raise LayoutAgentError(
+                    f"page {page_no}: box ({x:.3f},{y:.3f},{w:.3f},{h:.3f}) runs off the page"
+                )
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                ax, ay, aw, ah = boxes[i]
+                bx, by, bw, bh = boxes[j]
+                overlap_w = min(ax + aw, bx + bw) - max(ax, bx)
+                overlap_h = min(ay + ah, by + bh) - max(ay, by)
+                if overlap_w > tol and overlap_h > tol:
+                    raise LayoutAgentError(
+                        f"page {page_no}: items {i} and {j} overlap"
+                    )
+
     return parsed

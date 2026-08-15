@@ -37,19 +37,45 @@ def _seed_photo() -> uuid.UUID:
 # ---------- Deterministic layout ----------
 
 
-def test_deterministic_simple_2x2() -> None:
+def test_deterministic_page_is_not_uniform() -> None:
+    """The fallback used to give every photo an identical cell.
+
+    Even distribution plus equal cells was the reason albums looked mechanical
+    regardless of style, so the fallback now sizes by merit like the agent is asked to.
+    """
     pids = [_seed_photo() for _ in range(4)]
     plan = deterministic_layout(pids, page_count=1)
     assert len(plan.pages) == 1
     page = plan.pages[0]
-    assert page.grid.rows == 2 and page.grid.cols == 2
     assert len(page.items) == 4
-    # Positions are inside the unit square and non-overlapping enough.
+
+    assert page.items[0].emphasis == "hero"
+    areas = [i.position.w * i.position.h for i in page.items]
+    assert max(areas) > 2 * min(areas)
+
+    # Positions stay inside the unit square.
     for item in page.items:
         assert 0.0 <= item.position.x < 1.0
         assert 0.0 <= item.position.y < 1.0
         assert item.position.w > 0
         assert item.position.h > 0
+        assert item.position.x + item.position.w <= 1.0 + 1e-6
+        assert item.position.y + item.position.h <= 1.0 + 1e-6
+
+
+def test_deterministic_density_varies_between_styles() -> None:
+    """Style reached only the prompt before; the fallback ignored it entirely."""
+    pids = [_seed_photo() for _ in range(12)]
+    minimal = deterministic_layout(pids, page_count=4, style=AlbumStyle.MINIMALIST)
+    kids = deterministic_layout(pids, page_count=4, style=AlbumStyle.KIDS)
+
+    minimal_counts = [len(p.items) for p in minimal.pages]
+    kids_counts = [len(p.items) for p in kids.pages]
+
+    assert sum(minimal_counts) == 12 and sum(kids_counts) == 12
+    # Not every page holds the same number of photos.
+    assert len(set(minimal_counts)) > 1
+    assert minimal_counts != kids_counts
 
 
 def test_deterministic_splits_across_pages() -> None:

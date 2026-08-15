@@ -14,6 +14,14 @@ class LowResWarning(BaseModel):
     required_h: int
 
 
+class SizeRecommendation(BaseModel):
+    photo_id: str
+    # Largest standard print size the original fills at a true 300 DPI. None means even
+    # the smallest size would require upscaling.
+    recommended_size: str | None
+
+
 class ExportQualityResponse(BaseModel):
     album_id: uuid.UUID
     low_resolution_warnings: list[LowResWarning]
+    recommended_sizes: list[SizeRecommendation] = []

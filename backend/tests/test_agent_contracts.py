@@ -42,8 +42,9 @@ def _metadata(n: int) -> list[dict]:
     return [{"photo_id": str(uuid.uuid4()), "blur_score": 50.0, "taken_at": None} for _ in range(n)]
 
 
-def _position() -> dict:
-    return {"x": 0.02, "y": 0.02, "w": 0.4, "h": 0.4}
+def _position(i: int = 0) -> dict:
+    """Non-overlapping boxes in a single row — the agent now rejects overlaps."""
+    return {"x": 0.02 + i * 0.32, "y": 0.02, "w": 0.28, "h": 0.9}
 
 
 # ---------- Layout agent ----------
@@ -56,8 +57,8 @@ def test_layout_rejects_repeated_photo(monkeypatch) -> None:
             {
                 "grid": {"rows": 1, "cols": 2, "gap": 0.02},
                 "items": [
-                    {"photo_id": repeated, "position": _position()},
-                    {"photo_id": repeated, "position": _position()},
+                    {"photo_id": repeated, "position": _position(0)},
+                    {"photo_id": repeated, "position": _position(1)},
                 ],
             }
         ]
@@ -75,8 +76,8 @@ def test_layout_rejects_omitted_photo(monkeypatch) -> None:
             {
                 "grid": {"rows": 1, "cols": 2, "gap": 0.02},
                 "items": [
-                    {"photo_id": meta[0]["photo_id"], "position": _position()},
-                    {"photo_id": meta[1]["photo_id"], "position": _position()},
+                    {"photo_id": meta[0]["photo_id"], "position": _position(0)},
+                    {"photo_id": meta[1]["photo_id"], "position": _position(1)},
                 ],
             }
         ]
@@ -94,8 +95,8 @@ def test_layout_accepts_complete_unique_placement(monkeypatch) -> None:
             {
                 "grid": {"rows": 1, "cols": 2, "gap": 0.02},
                 "items": [
-                    {"photo_id": meta[0]["photo_id"], "position": _position()},
-                    {"photo_id": meta[1]["photo_id"], "position": _position()},
+                    {"photo_id": meta[0]["photo_id"], "position": _position(0)},
+                    {"photo_id": meta[1]["photo_id"], "position": _position(1)},
                 ],
             }
         ]

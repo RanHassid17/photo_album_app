@@ -39,22 +39,34 @@ You will receive a list of photos and a `page_count`. Your job is to lay them ou
 exactly that many pages for a printed album.
 
 Layout rules (apply in this order):
-1. Distribute photos evenly across pages -- avoid empty pages, avoid wildly crowded pages.
-2. Use simple grids: 1, 2, 3, 4, or 6 photos per page. 2x2 and 3x2 are the most \
-   reliable. Avoid grids larger than 3x3.
-3. Coordinates are normalized 0..1 (start-top origin; the renderer is RTL-aware).
-4. Items may not overlap. Leave a small uniform gap (~0.02).
-5. Comments are OPTIONAL -- only add a comment when the photo's metadata clearly \
+1. VARY THE DENSITY. Do NOT put the same number of photos on every page. Uniform pages \
+   are the most common failure and they make an album look mechanical. Give a strong \
+   photo a page to itself; group weaker or repetitive ones several to a page. Across the \
+   album aim for a mix -- some pages with 1-2 photos, some with 4-6.
+2. SIZE BY MERIT, NOT UNIFORMLY. On each page the best photo (high `blur_score`, more \
+   distinct `persons`, rarer `labels`) should occupy noticeably more area than its \
+   neighbours -- roughly 1.5x to 3x. Mark it `emphasis: "hero"`; mark the rest `normal`. \
+   A page of equal-sized boxes is only correct when the photos are genuinely equal.
+3. RESPECT ORIENTATION. Every photo carries `orientation` and `aspect_ratio`. Give \
+   landscape photos wide boxes and portrait photos tall ones. A box whose aspect ratio \
+   is far from the photo's own wastes the difference as empty margin, because the \
+   renderer letterboxes rather than crops. Never put a portrait photo in a wide box just \
+   to fill out a row.
+4. Coordinates are normalized 0..1 (start-top origin; the renderer is RTL-aware).
+5. Items may NOT overlap, and must stay inside the page. Leave a visible gap \
+   (0.02-0.04) between boxes and from the page edge.
+6. Comments are OPTIONAL -- only add a comment when the photo's metadata clearly \
    suggests one (date + faces present). Comments are at most 150 characters and live \
    `above`, `below`, `start`, or `end` of the photo. If unsure, set `comment_position` \
-   to `none` and omit the comment.
-6. Apply the requested `style`:
-   - modern:     clean grids, generous whitespace, sans-serif vibe
-   - classic:    centered, fewer per page, more whitespace
-   - kids:       playful but still readable; allow up to 6 per page
-   - romantic:   pairs and triples; centered
-   - minimalist: at most 4 per page; lots of whitespace
-7. Respect golden-ratio proportions where natural (a "hero" photo wider than tall).
+   to `none` and omit the comment. Never put an ID, a cluster hash or a raw timestamp in \
+   a comment -- it is shown to the user.
+7. Apply the requested `style`:
+   - modern:     asymmetric, one clear hero per page, 1-6 photos, generous whitespace
+   - classic:    centred and calm, 1-3 photos per page, wide margins
+   - kids:       playful and dense, 3-6 photos, small rotations (+/-4 deg) allowed
+   - romantic:   pairs and triples, one soft hero, lots of breathing room
+   - minimalist: 1-2 photos per page, very large margins, no rotation
+8. Prefer golden-ratio splits (0.62 / 0.38) over halves when dividing a page.
 
 You MUST return your answer by calling the `submit_layout` tool. Do not write prose \
 outside the tool call. Never reference photo_ids that weren't in the input.
@@ -101,6 +113,14 @@ LAYOUT_TOOL_SCHEMA = {
                                             },
                                         },
                                         "required": ["x", "y", "w", "h"],
+                                    },
+                                    "emphasis": {
+                                        "type": "string",
+                                        "enum": ["hero", "normal"],
+                                        "description": (
+                                            "'hero' marks the dominant photo on the page; "
+                                            "it should also have a visibly larger box."
+                                        ),
                                     },
                                     "comment": {"type": "string", "maxLength": 200},
                                     "comment_position": {

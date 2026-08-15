@@ -141,7 +141,7 @@ def test_pdf_export_service_raises_for_missing_album() -> None:
 # ---------- Print ZIP ----------
 
 
-def test_print_zip_has_three_size_folders(tmp_path: Path) -> None:
+def test_print_zip_has_a_folder_per_size(tmp_path: Path) -> None:
     album_id = _seed_album(tmp_path, n_photos=2, photo_size=(4000, 3000))
 
     db = SessionLocal()
@@ -156,15 +156,16 @@ def test_print_zip_has_three_size_folders(tmp_path: Path) -> None:
     with zipfile.ZipFile(io.BytesIO(bundle.data)) as zf:
         names = zf.namelist()
         for size in PRINT_SIZES:
-            # 2 unique photos × 3 sizes = 6 image entries + manifest
-            assert sum(1 for n in names if n.startswith(f"{size.label}/")) == 2
+            # Paths are now <album>/<size>/<album>_p<page>_<pos>.jpg per prompt spec §14.
+            assert sum(1 for n in names if f"/{size.label}/" in n) == 2
         assert "manifest.json" in names
 
         manifest = json.loads(zf.read("manifest.json"))
         assert manifest["dpi"] == 300
-        assert len(manifest["sizes_cm"]) == 3
-        # Source 3000x2000 is large enough — no warnings expected.
-        assert manifest["low_resolution_warnings"] == []
+        assert len(manifest["sizes_cm"]) == len(PRINT_SIZES)
+        # 4000x3000 fills every size except 30x40 (which needs 4724x3543).
+        assert {w["size"] for w in manifest["low_resolution_warnings"]} == {"30x40"}
+        assert manifest["recommended_sizes"][0]["recommended_size"] == "20x30"
 
 
 def test_print_zip_resizes_to_exact_300dpi_pixels(tmp_path: Path) -> None:
@@ -177,7 +178,7 @@ def test_print_zip_resizes_to_exact_300dpi_pixels(tmp_path: Path) -> None:
         db.close()
 
     with zipfile.ZipFile(io.BytesIO(bundle.data)) as zf:
-        sample_name = next(n for n in zf.namelist() if n.startswith("10x15/"))
+        sample_name = next(n for n in zf.namelist() if "/10x15/" in n)
         img = Image.open(io.BytesIO(zf.read(sample_name)))
         # 10x15 cm @ 300 DPI = 1181x1772 px in portrait orientation.
         # Source is landscape, so the box is rotated to landscape: 1772x1181.
@@ -226,9 +227,8 @@ def test_print_zip_dedupes_repeated_photos(tmp_path: Path) -> None:
         db.close()
 
     with zipfile.ZipFile(io.BytesIO(bundle.data)) as zf:
-        # 1 unique photo × 3 sizes = 3 image entries.
         image_entries = [n for n in zf.namelist() if n != "manifest.json"]
-        assert len(image_entries) == 3
+        assert len(image_entries) == len(PRINT_SIZES)
 
 
 # ---------- Quality report ----------
@@ -244,10 +244,11 @@ def test_low_res_warning_flagged_for_small_photos(tmp_path: Path) -> None:
     finally:
         db.close()
 
-    # One photo × three sizes = three warnings.
-    assert len(report.warnings) == 3
-    labels = {w.size_label for w in report.warnings}
-    assert labels == {"10x15", "13x18", "20x30"}
+    # 400x300 is too small for every standard size.
+    assert len(report.warnings) == len(PRINT_SIZES)
+    assert {w.size_label for w in report.warnings} == {s.label for s in PRINT_SIZES}
+    # Nothing is safe to print at 300 DPI.
+    assert report.recommendations[str(list(report.recommendations)[0])] is None
 
 
 def test_quality_endpoint_returns_warnings(tmp_path: Path) -> None:
@@ -256,14 +257,15 @@ def test_quality_endpoint_returns_warnings(tmp_path: Path) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["album_id"] == str(album_id)
-    assert len(body["low_resolution_warnings"]) == 3
+    assert len(body["low_resolution_warnings"]) == len(PRINT_SIZES)
     sample = body["low_resolution_warnings"][0]
     assert sample["original_w"] == 400
     assert sample["original_h"] == 300
 
 
 def test_quality_report_empty_for_large_source(tmp_path: Path) -> None:
-    album_id = _seed_album(tmp_path, n_photos=1, photo_size=(4000, 3000))
+    # Must clear the largest size (30x40 => 4724x3543 landscape).
+    album_id = _seed_album(tmp_path, n_photos=1, photo_size=(5000, 4000))
 
     db = SessionLocal()
     try:
