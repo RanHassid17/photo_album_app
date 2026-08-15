@@ -22,6 +22,25 @@ from app.db import SessionLocal
 from app.models import FaceCluster, FaceEmbedding, Photo
 
 
+def _cluster_now() -> int:
+    """Group unclustered faces into people, in-process.
+
+    Indexing queues clustering as a chord callback, which Celery tracks in the result
+    backend. Restarting the worker mid-run loses that counter, so every photo finishes
+    and the clustering step silently never fires -- leaving a full embeddings table and
+    zero people. Running it directly is the recovery, and it takes seconds because it is
+    pure numeric work with no model loading.
+    """
+    from app.workers.vision import cluster_faces
+
+    result = cluster_faces()
+    print(
+        f"clustered {result['clustered']} faces into {result['new_clusters']} people "
+        f"({result['noise']} unassigned)"
+    )
+    return 0
+
+
 def _print_status() -> int:
     db = SessionLocal()
     try:
@@ -83,10 +102,18 @@ def main() -> int:
     parser.add_argument(
         "--status", action="store_true", help="show re-indexing progress and exit"
     )
+    parser.add_argument(
+        "--cluster-only",
+        action="store_true",
+        help="group already-indexed faces into people, without re-indexing",
+    )
     args = parser.parse_args()
 
     if args.status:
         return _print_status()
+
+    if args.cluster_only:
+        return _cluster_now()
 
     if not args.yes and not args.dry_run:
         parser.error("pass --dry-run to preview, or --yes to run, or --status to check")
