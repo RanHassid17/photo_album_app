@@ -47,7 +47,25 @@ ALLOWED_LABELS = frozenset(
 )
 
 _YOLO_LABEL_CONF_THRESHOLD = 0.35
-_DEEPFACE_MODEL = "Facenet"  # 128-d embeddings.
+
+# Facenet512 over Facenet: same davidsandberg/facenet lineage (MIT), but 512-d instead
+# of 128-d. The 128-d embedding could not separate people reliably, which is what let a
+# single face cluster swallow 199 faces.
+#
+# MTCNN over OpenCV: the DeepFace default is an OpenCV Haar cascade, which misses turned
+# heads and returns sloppy boxes. A sloppy box crops badly, a bad crop embeds badly, and
+# a bad embedding clusters wrong — so the detector was poisoning everything downstream.
+#
+# Both are MIT. ArcFace and RetinaFace would be marginally stronger but their upstream
+# InsightFace weights are published for non-commercial research only, so they are
+# deliberately avoided here.
+_DEEPFACE_MODEL = "Facenet512"  # 512-d embeddings.
+_DEEPFACE_DETECTOR = "mtcnn"
+_FACE_EMBEDDING_DIM = 512
+
+# NOTE: ultralytics is AGPL-3.0 — the only copyleft dependency in the project. It applies
+# equally to yolov8n and yolov8s, so this upgrade changes nothing about the obligation.
+_YOLO_WEIGHTS = "yolov8s.pt"
 
 _yolo_model = None
 _yolo_lock = threading.Lock()
@@ -59,7 +77,7 @@ def _get_yolo():
         if _yolo_model is None:
             from ultralytics import YOLO
 
-            _yolo_model = YOLO("yolov8n.pt")
+            _yolo_model = YOLO(_YOLO_WEIGHTS)
     return _yolo_model
 
 
@@ -71,7 +89,7 @@ def face_embeddings(path: Path) -> Iterator[dict[str, Any]]:
         results = DeepFace.represent(
             img_path=str(path),
             model_name=_DEEPFACE_MODEL,
-            detector_backend="opencv",
+            detector_backend=_DEEPFACE_DETECTOR,
             enforce_detection=False,
             align=True,
         )

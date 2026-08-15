@@ -125,6 +125,23 @@ def cluster_faces(min_cluster_size: int = 2) -> dict[str, Any]:
         if len(rows) < min_cluster_size:
             return {"clustered": 0, "noise": len(rows), "new_clusters": 0}
 
+        # Embeddings of different lengths cannot be stacked, and after a face-model
+        # change the table holds both old and new vectors. Cluster the dominant
+        # dimension and leave the stragglers unclustered rather than crashing; they get
+        # picked up once the library is re-indexed.
+        by_dim: dict[int, list] = {}
+        for row in rows:
+            by_dim.setdefault(int(row.embedding_dim), []).append(row)
+        if len(by_dim) > 1:
+            log.warning(
+                "mixed face embedding dimensions %s — clustering the largest group only; "
+                "re-index to migrate the rest",
+                {d: len(v) for d, v in by_dim.items()},
+            )
+        rows = max(by_dim.values(), key=len)
+        if len(rows) < min_cluster_size:
+            return {"clustered": 0, "noise": len(rows), "new_clusters": 0}
+
         # Re-hydrate float32 embeddings from BYTEA.
         vectors = np.stack(
             [
@@ -137,10 +154,15 @@ def cluster_faces(min_cluster_size: int = 2) -> dict[str, Any]:
         norms = np.where(norms == 0, 1.0, norms)
         normalized = vectors / norms
 
+        # "leaf" instead of "eom": excess-of-mass prefers a few large, high-stability
+        # clusters, which on face embeddings means one blob absorbing many different
+        # people (a single cluster reached 199 faces). Leaf selection takes the tightest
+        # clusters in the tree instead — more clusters, each far more homogeneous, which
+        # is what a "who is in this photo" filter actually needs.
         clusterer = hdbscan.HDBSCAN(
             min_cluster_size=max(2, min_cluster_size),
             metric="euclidean",
-            cluster_selection_method="eom",
+            cluster_selection_method="leaf",
         )
         labels = clusterer.fit_predict(normalized)
 
