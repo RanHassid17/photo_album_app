@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 from celery import shared_task
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
@@ -114,6 +114,14 @@ def _index_from_analysis(  # noqa: PLR0913
     except Exception as exc:  # noqa: BLE001
         log.warning("blur failed for %s: %s", pid, exc)
         outcome.errors.append(f"blur:{exc}")
+
+    # Indexing REPLACES a photo's derived data rather than appending to it. Without
+    # this, re-indexing an already-indexed photo violates
+    # uq_photo_labels_photo_id_label on the first label it re-detects, the task
+    # crashes, and -- because index_photo is a chord header -- the whole chord fails,
+    # so cluster_faces never runs and the app is left with embeddings but no people.
+    db.execute(delete(FaceEmbedding).where(FaceEmbedding.photo_id == pid))
+    db.execute(delete(PhotoLabel).where(PhotoLabel.photo_id == pid))
 
     # --- Faces ---
     try:

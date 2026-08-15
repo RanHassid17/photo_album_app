@@ -192,3 +192,38 @@ def test_cluster_faces_groups_similar_embeddings(tmp_path: Path) -> None:
         assert all(e.cluster_id is not None for e in all_embeddings)
     finally:
         db.close()
+
+
+def test_index_photo_is_idempotent(
+    tmp_path: Path, stub_face_embeddings, stub_label_objects
+) -> None:
+    """Indexing the same photo twice must replace its derived data, not append.
+
+    Labels are unique on (photo_id, label). Appending violated that constraint on every
+    re-index, which crashed the task -- and because index_photo is a chord header, the
+    crash took cluster_faces with it, leaving embeddings but no people.
+    """
+    img = _seed_jpeg(tmp_path / "again.jpg")
+    photo_id = _insert_photo(img)
+
+    first = vision_module.index_photo.apply(args=[str(photo_id)]).get()
+    second = vision_module.index_photo.apply(args=[str(photo_id)]).get()
+
+    assert first["errors"] == []
+    assert second["errors"] == []
+    assert second["face_count"] == first["face_count"]
+    assert second["label_count"] == first["label_count"]
+
+    db = SessionLocal()
+    try:
+        labels = db.scalars(
+            select(PhotoLabel).where(PhotoLabel.photo_id == photo_id)
+        ).all()
+        faces = db.scalars(
+            select(FaceEmbedding).where(FaceEmbedding.photo_id == photo_id)
+        ).all()
+    finally:
+        db.close()
+
+    assert len(labels) == first["label_count"]   # not doubled
+    assert len(faces) == first["face_count"]
