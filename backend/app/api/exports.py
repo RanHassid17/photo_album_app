@@ -23,9 +23,34 @@ from app.services.export import (
 router = APIRouter(prefix="/api/albums", tags=["exports"])
 
 
+def _ascii_fallback(filename: str) -> str:
+    """An ASCII-only version of `filename`, keeping the extension.
+
+    HTTP headers are latin-1. The plain `filename=` parameter therefore cannot carry
+    Hebrew, and every non-Latin character has to be replaced rather than passed through.
+    """
+    stem, _, ext = filename.rpartition(".")
+    if not stem:  # no extension
+        stem, ext = filename, ""
+    cleaned = "".join(c if (c.isascii() and (c.isalnum() or c in "-_")) else "_" for c in stem)
+    cleaned = cleaned.strip("_") or "album"
+    return f"{cleaned}.{ext}" if ext else cleaned
+
+
 def _content_disposition(filename: str) -> str:
-    # RFC 5987 — supports Hebrew/Unicode album names without breaking older clients.
-    return f"attachment; filename=\"{filename}\"; filename*=UTF-8''{quote(filename)}"
+    """Build a Content-Disposition header that survives a Hebrew album name.
+
+    The previous version interpolated the raw name into the plain `filename=`
+    parameter. Starlette encodes headers as latin-1, so any album with a Hebrew name
+    raised UnicodeEncodeError and the whole export 500'd — which is why exporting
+    "sometimes" worked: it depended entirely on whether the album had been named.
+    Modern clients read `filename*`; `filename=` is only the legacy fallback and must
+    stay ASCII.
+    """
+    return (
+        f'attachment; filename="{_ascii_fallback(filename)}"; '
+        f"filename*=UTF-8''{quote(filename)}"
+    )
 
 
 @router.get("/{album_id}/export/quality", response_model=ExportQualityResponse)

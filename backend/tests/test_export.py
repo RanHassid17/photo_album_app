@@ -296,3 +296,44 @@ def test_quality_report_skips_photos_with_unknown_dimensions(tmp_path: Path) -> 
         db.close()
 
     assert report.warnings == []
+
+
+# ---------- Hebrew album names in Content-Disposition ----------
+
+def test_export_with_hebrew_album_name_does_not_500(tmp_path: Path) -> None:
+    """Starlette encodes headers as latin-1.
+
+    The raw album name used to be interpolated into the plain `filename=` parameter, so
+    any Hebrew name raised UnicodeEncodeError and the export 500'd. That is why exports
+    "sometimes" failed — it depended on whether the album had been named.
+    """
+    album_id = _seed_album(tmp_path, n_photos=1, photo_size=(1200, 900))
+
+    db = SessionLocal()
+    try:
+        album = db.get(Album, album_id)
+        assert album is not None
+        album.name = "קיץ 2024 בכרמל"
+        db.commit()
+    finally:
+        db.close()
+
+    for kind in ("pdf", "print"):
+        r = client.post(f"/api/albums/{album_id}/export/{kind}")
+        assert r.status_code == 200, f"{kind}: {r.text[:200]}"
+
+        disposition = r.headers["content-disposition"]
+        # Must survive the header encoding Starlette actually uses.
+        disposition.encode("latin-1")
+        # The real Hebrew name still travels, percent-encoded, per RFC 5987.
+        assert "filename*=UTF-8''" in disposition
+        assert "%D7" in disposition  # UTF-8 lead byte for Hebrew
+
+
+def test_ascii_fallback_keeps_extension_and_never_empties() -> None:
+    from app.api.exports import _ascii_fallback
+
+    assert _ascii_fallback("קיץ.pdf") == "album.pdf"
+    assert _ascii_fallback("Summer_2024.pdf") == "Summer_2024.pdf"
+    assert _ascii_fallback("קיץ 2024 בכרמל-print.zip").endswith(".zip")
+    assert _ascii_fallback("קיץ") == "album"
