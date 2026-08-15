@@ -57,16 +57,40 @@ def rename_cluster(
     return cluster
 
 
+# How many candidate faces to weigh when choosing the one to show.
+_REPRESENTATIVE_SAMPLE = 60
+
+
+def _face_area(face: FaceEmbedding) -> int:
+    bbox = face.bbox or {}
+    return int(bbox.get("w", 0) or 0) * int(bbox.get("h", 0) or 0)
+
+
 def _representative_face(db: Session, cluster: FaceCluster) -> tuple[Photo, dict]:
-    """Pick the face to show for a cluster: its representative photo, else any member."""
-    stmt = select(FaceEmbedding).where(FaceEmbedding.cluster_id == cluster.id)
-    if cluster.representative_photo_id is not None:
-        stmt = stmt.order_by(
-            (FaceEmbedding.photo_id == cluster.representative_photo_id).desc()
-        )
-    face = db.scalars(stmt.limit(1)).first()
-    if face is None:
+    """Pick the best face to show for a cluster.
+
+    Previously this took whichever row came back first, which is why people showed up
+    in profile or half-turned. A detector's box is largest when the subject is closest
+    to the camera and facing it, so the biggest box is a good cheap proxy for "a clear,
+    front-on face" without running a second model.
+    """
+    faces = list(
+        db.scalars(
+            select(FaceEmbedding)
+            .where(FaceEmbedding.cluster_id == cluster.id)
+            .limit(_REPRESENTATIVE_SAMPLE)
+        ).all()
+    )
+    if not faces:
         raise HTTPException(status_code=404, detail="cluster has no faces")
+
+    face = max(
+        faces,
+        key=lambda f: (
+            _face_area(f),
+            f.photo_id == cluster.representative_photo_id,
+        ),
+    )
     photo = db.get(Photo, face.photo_id)
     if photo is None:
         raise HTTPException(status_code=404, detail="photo not found")
@@ -87,7 +111,7 @@ def cluster_thumbnail(
         raise HTTPException(status_code=410, detail="photo file missing on disk")
 
     try:
-        thumb = get_or_create_face_thumb(cluster_id, source, bbox)
+        thumb = get_or_create_face_thumb(cluster_id, photo.id, source, bbox)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

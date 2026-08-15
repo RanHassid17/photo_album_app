@@ -11,7 +11,7 @@ from pydantic import ValidationError
 from app.agents.prompts import LAYOUT_SYSTEM, LAYOUT_TOOL_SCHEMA
 from app.config import get_settings
 from app.models import AlbumStyle
-from app.schemas.layouts import LayoutPlan
+from app.schemas.layouts import LayoutPlan, LayoutPosition
 
 log = logging.getLogger(__name__)
 
@@ -95,29 +95,52 @@ def call_layout_agent(
             f"layout omits {len(missing)} of {len(valid_ids)} input photos"
         )
 
-    # The prompt now asks for varied, non-uniform boxes rather than a fixed grid, which
-    # makes overlapping and off-page boxes far more likely than they were with fixed
-    # cells. A small tolerance absorbs the agent's rounding.
-    tol = 0.005
+    # Geometry is REPAIRED, not rejected. Asking the agent for varied, free-form boxes
+    # (rather than fixed grid cells) means small arithmetic slips are routine; throwing
+    # the whole plan away for a box 0.01 over the edge sends a perfectly good layout to
+    # the deterministic fallback and tells the user "the AI was unavailable". Only
+    # semantic errors above -- a photo placed twice or dropped -- are unrecoverable.
+    for page in parsed.pages:
+        for item in page.items:
+            _clamp_into_page(item.position)
+
+    # A little overlap can be deliberate (a photo tucked under a corner). Only a
+    # substantial collision is treated as a broken layout.
     for page_no, page in enumerate(parsed.pages):
         boxes = [
             (it.position.x, it.position.y, it.position.w, it.position.h)
             for it in page.items
         ]
-        for x, y, w, h in boxes:
-            if x + w > 1.0 + tol or y + h > 1.0 + tol:
-                raise LayoutAgentError(
-                    f"page {page_no}: box ({x:.3f},{y:.3f},{w:.3f},{h:.3f}) runs off the page"
-                )
         for i in range(len(boxes)):
             for j in range(i + 1, len(boxes)):
-                ax, ay, aw, ah = boxes[i]
-                bx, by, bw, bh = boxes[j]
-                overlap_w = min(ax + aw, bx + bw) - max(ax, bx)
-                overlap_h = min(ay + ah, by + bh) - max(ay, by)
-                if overlap_w > tol and overlap_h > tol:
+                if _overlap_fraction(boxes[i], boxes[j]) > _MAX_OVERLAP_FRACTION:
                     raise LayoutAgentError(
-                        f"page {page_no}: items {i} and {j} overlap"
+                        f"page {page_no}: items {i} and {j} overlap substantially"
                     )
 
     return parsed
+
+
+# Fraction of the smaller box that may be covered before a layout counts as broken.
+_MAX_OVERLAP_FRACTION = 0.2
+
+
+def _clamp_into_page(pos: LayoutPosition) -> None:
+    """Nudge a box back inside the unit square, preserving size where possible."""
+    pos.w = min(pos.w, 1.0)
+    pos.h = min(pos.h, 1.0)
+    pos.x = min(max(0.0, pos.x), 1.0 - pos.w)
+    pos.y = min(max(0.0, pos.y), 1.0 - pos.h)
+
+
+def _overlap_fraction(a: tuple, b: tuple) -> float:
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    overlap_w = min(ax + aw, bx + bw) - max(ax, bx)
+    overlap_h = min(ay + ah, by + bh) - max(ay, by)
+    if overlap_w <= 0 or overlap_h <= 0:
+        return 0.0
+    smaller = min(aw * ah, bw * bh)
+    if smaller <= 0:
+        return 0.0
+    return (overlap_w * overlap_h) / smaller

@@ -27,7 +27,9 @@
     "personN": "Person {{number}}",
     "namePlaceholder": "Name",
     "nameThisPerson": "Click to name",
-    "nameFailed": "Save failed"
+    "nameFailed": "Save failed",
+    "facesCount": "{{count}} faces in this cluster",
+    "labelsHint": "number of photos the object was detected in"
   },
   "selection": {
     "title": "Pick photos",
@@ -61,7 +63,7 @@
     "pageOf": "Page {{current}} of {{total}}",
     "needSelection": "Pick some photos first",
     "aiSummary": "Album designed by {{model}}",
-    "fallbackUsed": "AI unavailable — used deterministic grid",
+    "fallbackUsed": "AI layout unavailable or rejected — automatic layout used",
     "export": {
       "heading": "Export",
       "pdf": "Download PDF",

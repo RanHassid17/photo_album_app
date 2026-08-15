@@ -66,6 +66,7 @@ function PersonTile({
           className="w-full h-full object-cover bg-gray-100"
         />
         <span
+          title={t("filter.facesCount", { count: cluster.face_count })}
           className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[10px]
                      leading-4 text-center"
         >
@@ -166,7 +167,8 @@ export function FilterPanel({ value, onChange, onReset }: Props) {
 
       {/* Labels */}
       <section>
-        <h3 className="text-sm font-medium text-gray-700 mb-2">{t("filter.labels")}</h3>
+        <h3 className="text-sm font-medium text-gray-700">{t("filter.labels")}</h3>
+        <p className="text-[10px] text-gray-400 mb-2">{t("filter.labelsHint")}</p>
         {labelsQ.isLoading ? (
           <p className="text-xs text-gray-400">{t("filter.loading")}</p>
         ) : labelsQ.data && labelsQ.data.length > 0 ? (

@@ -27,7 +27,9 @@
     "personN": "אדם {{number}}",
     "namePlaceholder": "שם",
     "nameThisPerson": "לחצו כדי לתת שם",
-    "nameFailed": "השמירה נכשלה"
+    "nameFailed": "השמירה נכשלה",
+    "facesCount": "{{count}} פרצופים באשכול הזה",
+    "labelsHint": "מספר התמונות שבהן זוהה האובייקט"
   },
   "selection": {
     "title": "בחירת תמונות",
@@ -61,7 +63,7 @@
     "pageOf": "עמוד {{current}} מתוך {{total}}",
     "needSelection": "בחר/י תחילה תמונות מהרשת",
     "aiSummary": "האלבום עוצב על־ידי {{model}}",
-    "fallbackUsed": "ה־AI לא היה זמין — שימוש בפריסת רשת אוטומטית",
+    "fallbackUsed": "פריסת ה-AI לא הייתה זמינה או נדחתה — נעשה שימוש בפריסה אוטומטית",
     "export": {
       "heading": "ייצוא",
       "pdf": "הורדת PDF",

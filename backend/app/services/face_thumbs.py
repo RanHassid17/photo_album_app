@@ -7,6 +7,7 @@ photo and FaceEmbedding already stored a bounding box; this turns the two into a
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import threading
@@ -33,8 +34,14 @@ def _face_dir() -> Path:
     return get_settings().photo_storage_dir.resolve() / "_faces"
 
 
-def face_thumb_path_for(cluster_id: uuid.UUID) -> Path:
-    return _face_dir() / f"{cluster_id}.webp"
+def _crop_key(photo_id: uuid.UUID, bbox: dict) -> str:
+    """Short digest of the exact crop, so the cache invalidates when the chosen face changes."""
+    raw = f"{photo_id}:{bbox.get('x')}:{bbox.get('y')}:{bbox.get('w')}:{bbox.get('h')}"
+    return hashlib.sha1(raw.encode()).hexdigest()[:12]
+
+
+def face_thumb_path_for(cluster_id: uuid.UUID, key: str) -> Path:
+    return _face_dir() / f"{cluster_id}_{key}.webp"
 
 
 def _lock_for(cluster_id: uuid.UUID) -> threading.Lock:
@@ -63,14 +70,14 @@ def _padded_box(bbox: dict, img_w: int, img_h: int) -> tuple[int, int, int, int]
 
 
 def get_or_create_face_thumb(
-    cluster_id: uuid.UUID, source_path: Path, bbox: dict
+    cluster_id: uuid.UUID, photo_id: uuid.UUID, source_path: Path, bbox: dict
 ) -> Path:
     """Return a path to a square-ish cropped face thumbnail, generating + caching on miss.
 
     Coordinates are used exactly as the detector recorded them — no EXIF transpose — so
     the crop matches the frame the bounding box was measured against.
     """
-    target = face_thumb_path_for(cluster_id)
+    target = face_thumb_path_for(cluster_id, _crop_key(photo_id, bbox))
     if target.exists() and target.stat().st_size > 0:
         return target
 

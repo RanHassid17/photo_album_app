@@ -147,3 +147,83 @@ def test_selection_allows_fewer_when_input_is_smaller(monkeypatch) -> None:
 
     resp = call_selection_agent(meta, target_count=10, criteria=None)
     assert len(resp.picks) == 2
+
+
+def test_layout_clamps_offpage_box_instead_of_rejecting(monkeypatch) -> None:
+    """A box slightly off the page is repaired, not thrown away.
+
+    Rejecting sent an otherwise-good layout to the deterministic fallback and told the
+    user the AI was unavailable.
+    """
+    meta = _metadata(1)
+    payload = {
+        "pages": [
+            {
+                "grid": {"rows": 1, "cols": 1, "gap": 0.02},
+                "items": [
+                    {
+                        "photo_id": meta[0]["photo_id"],
+                        "position": {"x": 0.3, "y": 0.3, "w": 0.9, "h": 0.9},
+                    }
+                ],
+            }
+        ]
+    }
+    _install_fake_claude(monkeypatch, layout_agent, payload)
+
+    plan = call_layout_agent(meta, page_count=1, style=AlbumStyle.MODERN)
+    pos = plan.pages[0].items[0].position
+    assert pos.x + pos.w <= 1.0 + 1e-9
+    assert pos.y + pos.h <= 1.0 + 1e-9
+    assert pos.w == 0.9 and pos.h == 0.9  # size preserved, only moved
+
+
+def test_layout_rejects_substantial_overlap(monkeypatch) -> None:
+    meta = _metadata(2)
+    payload = {
+        "pages": [
+            {
+                "grid": {"rows": 1, "cols": 2, "gap": 0.02},
+                "items": [
+                    {
+                        "photo_id": meta[0]["photo_id"],
+                        "position": {"x": 0.1, "y": 0.1, "w": 0.5, "h": 0.5},
+                    },
+                    {
+                        "photo_id": meta[1]["photo_id"],
+                        "position": {"x": 0.15, "y": 0.15, "w": 0.5, "h": 0.5},
+                    },
+                ],
+            }
+        ]
+    }
+    _install_fake_claude(monkeypatch, layout_agent, payload)
+
+    with pytest.raises(LayoutAgentError, match="overlap"):
+        call_layout_agent(meta, page_count=1, style=AlbumStyle.MODERN)
+
+
+def test_layout_tolerates_slight_overlap(monkeypatch) -> None:
+    """Touching corners are normal in a free-form layout and must not trigger fallback."""
+    meta = _metadata(2)
+    payload = {
+        "pages": [
+            {
+                "grid": {"rows": 1, "cols": 2, "gap": 0.02},
+                "items": [
+                    {
+                        "photo_id": meta[0]["photo_id"],
+                        "position": {"x": 0.02, "y": 0.02, "w": 0.45, "h": 0.9},
+                    },
+                    {
+                        "photo_id": meta[1]["photo_id"],
+                        "position": {"x": 0.46, "y": 0.02, "w": 0.45, "h": 0.9},
+                    },
+                ],
+            }
+        ]
+    }
+    _install_fake_claude(monkeypatch, layout_agent, payload)
+
+    plan = call_layout_agent(meta, page_count=1, style=AlbumStyle.MODERN)
+    assert len(plan.pages[0].items) == 2
