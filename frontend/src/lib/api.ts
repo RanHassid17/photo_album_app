@@ -84,6 +84,24 @@ export async function fetchFaceClusters(): Promise<FaceCluster[]> {
   return (await r.json()) as FaceCluster[];
 }
 
+export function faceClusterThumbUrl(clusterId: string): string {
+  return `${BASE_URL}/api/face-clusters/${clusterId}/thumb`;
+}
+
+/** Names are stored on the global cluster, so they carry over to future albums. */
+export async function renameFaceCluster(
+  clusterId: string,
+  name: string | null,
+): Promise<FaceCluster> {
+  const r = await fetch(`${BASE_URL}/api/face-clusters/${clusterId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!r.ok) throw new Error(`Rename failed: ${r.status}`);
+  return (await r.json()) as FaceCluster;
+}
+
 // ---------- Labels ----------
 
 export interface LabelCount {

@@ -23,7 +23,11 @@
     "noLabels": "No labels detected yet",
     "results": "{{count}} photos",
     "empty": "No results for the current filter",
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "personN": "Person {{number}}",
+    "namePlaceholder": "Name",
+    "nameThisPerson": "Click to name",
+    "nameFailed": "Save failed"
   },
   "selection": {
     "title": "Pick photos",
@@ -67,6 +71,8 @@
       "lowResWarning_one": "{{count}} photo is smaller than at least one print size; output will be upscaled.",
       "lowResOk": "All photos meet print resolution.",
       "failed": "Export failed: {{message}}"
-    }
+    },
+    "prevPage": "Previous page",
+    "nextPage": "Next page"
   }
 }

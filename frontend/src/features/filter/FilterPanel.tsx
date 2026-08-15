@@ -1,9 +1,113 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { fetchFaceClusters, fetchLabels } from "@/lib/api";
+import {
+  faceClusterThumbUrl,
+  fetchFaceClusters,
+  fetchLabels,
+  renameFaceCluster,
+} from "@/lib/api";
+import type { FaceCluster } from "@/lib/api";
 
 import type { FilterState } from "./types";
+
+/**
+ * One person in the people filter: their face, their name, and a way to set it.
+ *
+ * The list previously showed a truncated cluster UUID, which gave no way to tell who a
+ * person was. Names live on the global cluster, so naming someone here also names them
+ * in every album made later.
+ */
+function PersonTile({
+  cluster,
+  index,
+  active,
+  onToggle,
+}: {
+  cluster: FaceCluster;
+  index: number;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useTranslation();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(cluster.name ?? "");
+  const [failed, setFailed] = useState(false);
+
+  const rename = useMutation({
+    mutationFn: (name: string | null) => renameFaceCluster(cluster.id, name),
+    onSuccess: () => {
+      setEditing(false);
+      setFailed(false);
+      void qc.invalidateQueries({ queryKey: ["face-clusters"] });
+    },
+    onError: () => setFailed(true),
+  });
+
+  const label = cluster.name ?? t("filter.personN", { number: index + 1 });
+
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        title={label}
+        aria-pressed={active}
+        className={`relative w-full aspect-square overflow-hidden rounded-lg border-2 ${
+          active ? "border-indigo-600" : "border-transparent hover:border-gray-300"
+        }`}
+      >
+        <img
+          src={faceClusterThumbUrl(cluster.id)}
+          alt={label}
+          loading="lazy"
+          className="w-full h-full object-cover bg-gray-100"
+        />
+        <span
+          className="absolute bottom-0 inset-x-0 bg-black/55 text-white text-[10px]
+                     leading-4 text-center"
+        >
+          {cluster.face_count}
+        </span>
+      </button>
+
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => rename.mutate(draft.trim() || null)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") rename.mutate(draft.trim() || null);
+            if (e.key === "Escape") {
+              setDraft(cluster.name ?? "");
+              setEditing(false);
+            }
+          }}
+          placeholder={t("filter.namePlaceholder")}
+          className="w-full rounded border border-gray-300 px-1 py-0.5 text-[11px] text-center"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            setDraft(cluster.name ?? "");
+            setEditing(true);
+          }}
+          className={`w-full truncate text-[11px] hover:underline ${
+            cluster.name ? "text-gray-800" : "text-gray-400"
+          }`}
+          title={t("filter.nameThisPerson")}
+        >
+          {label}
+        </button>
+      )}
+      {failed && <span className="text-[10px] text-red-600">{t("filter.nameFailed")}</span>}
+    </div>
+  );
+}
 
 interface Props {
   value: FilterState;
@@ -44,24 +148,16 @@ export function FilterPanel({ value, onChange, onReset }: Props) {
         {clustersQ.isLoading ? (
           <p className="text-xs text-gray-400">{t("filter.loading")}</p>
         ) : clustersQ.data && clustersQ.data.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {clustersQ.data.map((c) => {
-              const active = selectedPeople.has(c.id);
-              return (
-                <button
-                  key={c.id}
-                  onClick={() => toggleId("person_cluster_ids", c.id)}
-                  className={`px-2.5 py-1 rounded-full border text-xs ${
-                    active
-                      ? "bg-indigo-600 text-white border-indigo-600"
-                      : "bg-gray-50 border-gray-300 text-gray-700 hover:bg-gray-100"
-                  }`}
-                >
-                  {c.name ?? `#${c.id.slice(0, 4)}`}
-                  <span className="ms-1 opacity-70">({c.face_count})</span>
-                </button>
-              );
-            })}
+          <div className="grid grid-cols-3 gap-2">
+            {clustersQ.data.map((c, i) => (
+              <PersonTile
+                key={c.id}
+                cluster={c}
+                index={i}
+                active={selectedPeople.has(c.id)}
+                onToggle={() => toggleId("person_cluster_ids", c.id)}
+              />
+            ))}
           </div>
         ) : (
           <p className="text-xs text-gray-400">{t("filter.noPeople")}</p>

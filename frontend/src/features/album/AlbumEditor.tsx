@@ -8,7 +8,7 @@ import type { AlbumStyle } from "@/lib/api";
 import { useSelectionStore } from "@/features/selection/store";
 
 import { ExportPanel } from "./ExportPanel";
-import { PageView } from "./PageView";
+import { Flipbook } from "./Flipbook";
 import { useAlbumStore } from "./store";
 
 const STYLES: AlbumStyle[] = ["modern", "classic", "kids", "romantic", "minimalist"];
@@ -27,7 +27,6 @@ export function AlbumEditor() {
   const [name, setName] = useState<string>("");
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [pageIdx, setPageIdx] = useState<number>(0);
 
   const albumQ = useQuery({
     queryKey: ["album", currentAlbumId],
@@ -36,8 +35,6 @@ export function AlbumEditor() {
   });
 
   const album = albumQ.data;
-  const totalPages = album?.pages.length ?? 0;
-  const safePageIdx = Math.min(pageIdx, Math.max(0, totalPages - 1));
 
   const runSuggest = async () => {
     if (selected.length === 0) {
@@ -54,7 +51,6 @@ export function AlbumEditor() {
         name: name.trim() || undefined,
       });
       setCurrentAlbum(resp.album_id);
-      setPageIdx(0);
       await qc.invalidateQueries({ queryKey: ["album", resp.album_id] });
     } catch (e) {
       setError((e as Error).message);
@@ -129,38 +125,16 @@ export function AlbumEditor() {
           {album.name && (
             <h3 className="text-base font-semibold text-gray-900">{album.name}</h3>
           )}
-          <div className="flex items-center justify-between text-xs text-gray-600">
-            <span>
-              {album.used_fallback ? (
-                <span className="text-amber-700">{t("album.fallbackUsed")}</span>
-              ) : (
-                t("album.aiSummary", { model: album.model ?? "claude" })
-              )}
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPageIdx((i) => Math.max(0, i - 1))}
-                disabled={safePageIdx <= 0}
-                className="px-2 py-0.5 rounded border border-gray-300 disabled:opacity-40"
-              >
-                ‹
-              </button>
-              <span>
-                {t("album.pageOf", { current: safePageIdx + 1, total: totalPages })}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPageIdx((i) => Math.min(totalPages - 1, i + 1))}
-                disabled={safePageIdx >= totalPages - 1}
-                className="px-2 py-0.5 rounded border border-gray-300 disabled:opacity-40"
-              >
-                ›
-              </button>
-            </div>
-          </div>
+          <p className="text-xs text-gray-600">
+            {album.used_fallback ? (
+              <span className="text-amber-700">{t("album.fallbackUsed")}</span>
+            ) : (
+              t("album.aiSummary", { model: album.model ?? "claude" })
+            )}
+          </p>
 
-          {album.pages[safePageIdx] && <PageView page={album.pages[safePageIdx]} />}
+          {/* key resets the flipbook to page 1 whenever a new album is generated */}
+          <Flipbook key={album.id} pages={album.pages} />
 
           <ExportPanel albumId={album.id} />
         </div>
