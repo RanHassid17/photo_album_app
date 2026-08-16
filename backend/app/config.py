@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     vision_face_detector: str = "mtcnn"
     vision_yolo_weights: str = "yolov8s.pt"
 
+    # Two face clusters whose average embeddings are closer than this (cosine distance)
+    # are treated as the same person and merged. 0.30 is DeepFace's own same-person
+    # threshold for Facenet512. Lower it and one person shows up several times in the
+    # people filter; raise it and different people start fusing into one.
+    vision_face_merge_distance: float = 0.30
+
     photo_storage_dir: Path = Path("./photo_storage")
     export_dir: Path = Path("./exports")
 

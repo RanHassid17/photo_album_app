@@ -227,3 +227,105 @@ def test_index_photo_is_idempotent(
 
     assert len(labels) == first["label_count"]   # not doubled
     assert len(faces) == first["face_count"]
+
+
+def _unit(vec: np.ndarray) -> np.ndarray:
+    return (vec / np.linalg.norm(vec)).astype(np.float32)
+
+
+def _seed_cluster(db, photo_id: uuid.UUID, vectors, name: str | None = None) -> uuid.UUID:
+    """Write a ready-made cluster with the given member embeddings."""
+    cluster = FaceCluster(
+        face_count=len(vectors), representative_photo_id=photo_id, name=name
+    )
+    db.add(cluster)
+    db.flush()
+    for vec in vectors:
+        db.add(
+            FaceEmbedding(
+                photo_id=photo_id,
+                cluster_id=cluster.id,
+                bbox={"x": 0, "y": 0, "w": 32, "h": 32},
+                embedding=vec.tobytes(),
+                embedding_dim=int(vec.size),
+            )
+        )
+    db.commit()
+    return cluster.id
+
+
+def test_cluster_faces_merges_duplicate_people(tmp_path: Path) -> None:
+    """Leaf clustering splits one person across clusters; the merge pass rejoins them.
+
+    Two clusters whose centroids sit well inside the same-person threshold must end up
+    as one person, while a genuinely different face stays separate.
+    """
+    photo_id = _insert_photo(_seed_jpeg(tmp_path / "merge.jpg"))
+    rng = np.random.default_rng(7)
+
+    person = np.zeros(128, dtype=np.float32)
+    person[0] = 1.0
+    # Same person, two slightly different looks — centroids ~0.02 apart.
+    left = [_unit(person + rng.normal(0, 0.01, 128).astype(np.float32)) for _ in range(3)]
+    tilt = person.copy()
+    tilt[1] = 0.2
+    right = [_unit(tilt + rng.normal(0, 0.01, 128).astype(np.float32)) for _ in range(2)]
+    # A different person: orthogonal, so cosine distance 1.0.
+    other_base = np.zeros(128, dtype=np.float32)
+    other_base[5] = 1.0
+    other = [_unit(other_base + rng.normal(0, 0.01, 128).astype(np.float32)) for _ in range(2)]
+
+    db = SessionLocal()
+    try:
+        keep = _seed_cluster(db, photo_id, left, name="Dana")
+        dupe = _seed_cluster(db, photo_id, right)
+        stranger = _seed_cluster(db, photo_id, other)
+    finally:
+        db.close()
+
+    out = vision_module.cluster_faces.apply(kwargs={"min_cluster_size": 2}).get()
+    assert out["merged"] == 1
+
+    db = SessionLocal()
+    try:
+        assert db.get(FaceCluster, dupe) is None
+        survivor = db.get(FaceCluster, keep)
+        # The named cluster survives, so the user's name is not lost.
+        assert survivor is not None and survivor.name == "Dana"
+        assert survivor.face_count == 5
+        assert db.get(FaceCluster, stranger) is not None
+
+        moved = db.scalars(
+            select(FaceEmbedding).where(FaceEmbedding.cluster_id == keep)
+        ).all()
+        assert len(moved) == 5
+    finally:
+        db.close()
+
+
+def test_cluster_faces_keeps_differently_named_people_apart(tmp_path: Path) -> None:
+    """A name is the user's own judgement and outranks the embedding distance."""
+    photo_id = _insert_photo(_seed_jpeg(tmp_path / "named.jpg"))
+    rng = np.random.default_rng(11)
+
+    base = np.zeros(128, dtype=np.float32)
+    base[0] = 1.0
+    twin_a = [_unit(base + rng.normal(0, 0.01, 128).astype(np.float32)) for _ in range(2)]
+    twin_b = [_unit(base + rng.normal(0, 0.01, 128).astype(np.float32)) for _ in range(2)]
+
+    db = SessionLocal()
+    try:
+        a = _seed_cluster(db, photo_id, twin_a, name="Yael")
+        b = _seed_cluster(db, photo_id, twin_b, name="Noa")
+    finally:
+        db.close()
+
+    out = vision_module.cluster_faces.apply(kwargs={"min_cluster_size": 2}).get()
+    assert out["merged"] == 0
+
+    db = SessionLocal()
+    try:
+        assert db.get(FaceCluster, a) is not None
+        assert db.get(FaceCluster, b) is not None
+    finally:
+        db.close()

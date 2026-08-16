@@ -9,11 +9,12 @@ from typing import Any
 
 import numpy as np
 from celery import shared_task
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.db import SessionLocal
 from app.models import FaceCluster, FaceEmbedding, Photo, PhotoLabel
+from app.services.face_thumbs import delete_face_thumbs
 from app.services.imaging import analysis_copy
 from app.workers.celery_app import celery_app  # noqa: F401 -- bind shared_tasks to our app
 from app.workers.exif import extract_exif_metadata
@@ -151,89 +152,192 @@ def _index_from_analysis(  # noqa: PLR0913
         outcome.errors.append(f"labels:{exc}")
 
 
+def _normalized(row: FaceEmbedding) -> np.ndarray:
+    """Unit-length float32 vector for one stored face."""
+    vec = np.frombuffer(row.embedding, dtype=np.float32).reshape(row.embedding_dim)
+    norm = float(np.linalg.norm(vec))
+    return vec / norm if norm else vec
+
+
+def _merge_duplicate_clusters(db: Session, max_distance: float) -> int:
+    """Fold clusters that are the same person into one. Returns clusters removed.
+
+    Two things make duplicates unavoidable without this pass. `cluster_selection_method
+    ="leaf"` deliberately cuts the HDBSCAN tree at its tightest nodes, which splits one
+    person across several clusters whenever their photos span lighting, angle or years.
+    And clustering is incremental -- it only ever looks at faces with no cluster yet --
+    so every new import invents fresh clusters for people who already have one.
+
+    Merging on the average embedding fixes both: a cluster's centroid is a much cleaner
+    signal of identity than any single face, so the same person's fragments sit far
+    closer together than two different people ever do.
+    """
+    from scipy.cluster.hierarchy import fcluster, linkage
+    from scipy.spatial.distance import squareform
+
+    rows = db.scalars(
+        select(FaceEmbedding).where(FaceEmbedding.cluster_id.is_not(None))
+    ).all()
+
+    by_cluster: dict[uuid.UUID, list[np.ndarray]] = {}
+    for row in rows:
+        by_cluster.setdefault(row.cluster_id, []).append(_normalized(row))
+    # Only comparable dimensions can be stacked; mixed dims are already logged upstream.
+    per_dim: dict[int, int] = {}
+    for vs in by_cluster.values():
+        for v in vs:
+            per_dim[v.size] = per_dim.get(v.size, 0) + 1
+    if len(per_dim) > 1:
+        keep = max(per_dim, key=lambda d: per_dim[d])
+        by_cluster = {
+            cid: vs for cid, vs in by_cluster.items() if all(v.size == keep for v in vs)
+        }
+    if len(by_cluster) < 2:
+        return 0
+
+    cluster_ids = list(by_cluster)
+    centroids = np.stack([np.mean(by_cluster[cid], axis=0) for cid in cluster_ids])
+    norms = np.linalg.norm(centroids, axis=1, keepdims=True)
+    centroids = centroids / np.where(norms == 0, 1.0, norms)
+
+    distances = np.clip(1.0 - centroids @ centroids.T, 0.0, None)
+    np.fill_diagonal(distances, 0.0)
+    # Average linkage, not single: single linkage chains two people together through one
+    # ambiguous cluster sitting between them.
+    groups = fcluster(
+        linkage(squareform(distances, checks=False), method="average"),
+        t=max_distance,
+        criterion="distance",
+    )
+
+    merged_away = 0
+    for group in set(groups):
+        members = [cid for cid, g in zip(cluster_ids, groups, strict=True) if g == group]
+        if len(members) < 2:
+            continue
+        clusters = [
+            c for c in (db.get(FaceCluster, cid) for cid in members) if c is not None
+        ]
+        named = [c for c in clusters if c.name]
+        if len({c.name for c in named}) > 1:
+            # The user told us these are different people. Believe them over the model.
+            log.info(
+                "not merging clusters with conflicting names: %s",
+                sorted(c.name for c in named),
+            )
+            continue
+
+        # Keep the named cluster so the name survives; otherwise the biggest one, which
+        # keeps the representative face that the user has already learned to recognise.
+        survivor = named[0] if named else max(clusters, key=lambda c: c.face_count)
+        losers = [c for c in clusters if c.id != survivor.id]
+        for loser in losers:
+            db.execute(
+                update(FaceEmbedding)
+                .where(FaceEmbedding.cluster_id == loser.id)
+                .values(cluster_id=survivor.id)
+            )
+            if survivor.representative_photo_id is None:
+                survivor.representative_photo_id = loser.representative_photo_id
+            delete_face_thumbs(loser.id)
+            db.delete(loser)
+        survivor.face_count = sum(len(by_cluster[c.id]) for c in clusters)
+        merged_away += len(losers)
+
+    return merged_away
+
+
+def _cluster_new_faces(db: Session, min_cluster_size: int) -> tuple[int, int, int]:
+    """HDBSCAN over faces with no cluster yet. Returns (clustered, noise, new clusters)."""
+    import hdbscan  # heavy import; defer
+
+    rows = db.scalars(
+        select(FaceEmbedding).where(FaceEmbedding.cluster_id.is_(None))
+    ).all()
+    if len(rows) < min_cluster_size:
+        return 0, len(rows), 0
+
+    # Embeddings of different lengths cannot be stacked, and after a face-model
+    # change the table holds both old and new vectors. Cluster the dominant
+    # dimension and leave the stragglers unclustered rather than crashing; they get
+    # picked up once the library is re-indexed.
+    by_dim: dict[int, list] = {}
+    for row in rows:
+        by_dim.setdefault(int(row.embedding_dim), []).append(row)
+    if len(by_dim) > 1:
+        log.warning(
+            "mixed face embedding dimensions %s — clustering the largest group only; "
+            "re-index to migrate the rest",
+            {d: len(v) for d, v in by_dim.items()},
+        )
+    rows = max(by_dim.values(), key=len)
+    if len(rows) < min_cluster_size:
+        return 0, len(rows), 0
+
+    # Re-hydrate float32 embeddings from BYTEA and L2-normalize, so cosine distance
+    # matches the metric face nets are trained on.
+    normalized = np.stack([_normalized(row) for row in rows])
+
+    # "leaf" instead of "eom": excess-of-mass prefers a few large, high-stability
+    # clusters, which on face embeddings means one blob absorbing many different
+    # people (a single cluster reached 199 faces). Leaf selection takes the tightest
+    # clusters in the tree instead. It errs the other way — one person split across
+    # several clusters — which _merge_duplicate_clusters then stitches back together.
+    clusterer = hdbscan.HDBSCAN(
+        min_cluster_size=max(2, min_cluster_size),
+        metric="euclidean",
+        cluster_selection_method="leaf",
+    )
+    labels = clusterer.fit_predict(normalized)
+
+    cluster_ids: dict[int, uuid.UUID] = {}
+    clustered = 0
+    noise = 0
+    for row, label in zip(rows, labels, strict=True):
+        if label < 0:
+            noise += 1
+            continue
+        cid = cluster_ids.get(int(label))
+        if cid is None:
+            cluster = FaceCluster(face_count=0, representative_photo_id=row.photo_id)
+            db.add(cluster)
+            db.flush()
+            cid = cluster.id
+            cluster_ids[int(label)] = cid
+        row.cluster_id = cid
+        clustered += 1
+
+    # Update face_count tallies.
+    for label, cid in cluster_ids.items():
+        cluster = db.get(FaceCluster, cid)
+        if cluster is not None:
+            cluster.face_count = int(np.sum(labels == label))
+
+    db.flush()
+    return clustered, noise, len(cluster_ids)
+
+
 @shared_task(name="vision.cluster_faces")
 def cluster_faces(min_cluster_size: int = 2) -> dict[str, Any]:
-    """Run HDBSCAN over all unclustered face embeddings, write FaceCluster rows."""
-    import hdbscan  # heavy import; defer
+    """Group face embeddings into people: cluster the new faces, then de-duplicate.
+
+    The merge step runs over every cluster, not just the ones created here, because
+    duplicates of the same person accumulate across runs as new photos are imported.
+    """
+    from app.config import get_settings
 
     db: Session = SessionLocal()
     try:
-        rows = db.scalars(
-            select(FaceEmbedding).where(FaceEmbedding.cluster_id.is_(None))
-        ).all()
-        if len(rows) < min_cluster_size:
-            return {"clustered": 0, "noise": len(rows), "new_clusters": 0}
-
-        # Embeddings of different lengths cannot be stacked, and after a face-model
-        # change the table holds both old and new vectors. Cluster the dominant
-        # dimension and leave the stragglers unclustered rather than crashing; they get
-        # picked up once the library is re-indexed.
-        by_dim: dict[int, list] = {}
-        for row in rows:
-            by_dim.setdefault(int(row.embedding_dim), []).append(row)
-        if len(by_dim) > 1:
-            log.warning(
-                "mixed face embedding dimensions %s — clustering the largest group only; "
-                "re-index to migrate the rest",
-                {d: len(v) for d, v in by_dim.items()},
-            )
-        rows = max(by_dim.values(), key=len)
-        if len(rows) < min_cluster_size:
-            return {"clustered": 0, "noise": len(rows), "new_clusters": 0}
-
-        # Re-hydrate float32 embeddings from BYTEA.
-        vectors = np.stack(
-            [
-                np.frombuffer(row.embedding, dtype=np.float32).reshape(row.embedding_dim)
-                for row in rows
-            ]
+        clustered, noise, new_clusters = _cluster_new_faces(db, min_cluster_size)
+        merged = _merge_duplicate_clusters(
+            db, get_settings().vision_face_merge_distance
         )
-        # L2-normalize so cosine distance matches the metric face nets are trained on.
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-        norms = np.where(norms == 0, 1.0, norms)
-        normalized = vectors / norms
-
-        # "leaf" instead of "eom": excess-of-mass prefers a few large, high-stability
-        # clusters, which on face embeddings means one blob absorbing many different
-        # people (a single cluster reached 199 faces). Leaf selection takes the tightest
-        # clusters in the tree instead — more clusters, each far more homogeneous, which
-        # is what a "who is in this photo" filter actually needs.
-        clusterer = hdbscan.HDBSCAN(
-            min_cluster_size=max(2, min_cluster_size),
-            metric="euclidean",
-            cluster_selection_method="leaf",
-        )
-        labels = clusterer.fit_predict(normalized)
-
-        cluster_ids: dict[int, uuid.UUID] = {}
-        clustered = 0
-        noise = 0
-        for row, label in zip(rows, labels, strict=True):
-            if label < 0:
-                noise += 1
-                continue
-            cid = cluster_ids.get(int(label))
-            if cid is None:
-                cluster = FaceCluster(face_count=0, representative_photo_id=row.photo_id)
-                db.add(cluster)
-                db.flush()
-                cid = cluster.id
-                cluster_ids[int(label)] = cid
-            row.cluster_id = cid
-            clustered += 1
-
-        # Update face_count tallies.
-        for label, cid in cluster_ids.items():
-            count = int(np.sum(labels == label))
-            cluster = db.get(FaceCluster, cid)
-            if cluster is not None:
-                cluster.face_count = count
-
         db.commit()
         return {
             "clustered": clustered,
             "noise": noise,
-            "new_clusters": len(cluster_ids),
+            "new_clusters": new_clusters,
+            "merged": merged,
         }
     except Exception:  # noqa: BLE001
         db.rollback()

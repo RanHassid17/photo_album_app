@@ -38,6 +38,8 @@ def _cluster_now() -> int:
         f"clustered {result['clustered']} faces into {result['new_clusters']} people "
         f"({result['noise']} unassigned)"
     )
+    if result.get("merged"):
+        print(f"merged {result['merged']} duplicate clusters into existing people")
     return 0
 
 

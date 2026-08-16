@@ -70,6 +70,22 @@ def _padded_box(bbox: dict, img_w: int, img_h: int) -> tuple[int, int, int, int]
     return left, top, right, bottom
 
 
+def delete_face_thumbs(cluster_id: uuid.UUID) -> int:
+    """Drop every cached crop for a cluster. Returns how many files were removed.
+
+    Called when a cluster is merged away: its id will never be requested again, so the
+    files would sit in storage forever.
+    """
+    removed = 0
+    for path in _face_dir().glob(f"{cluster_id}_*.webp"):
+        try:
+            path.unlink()
+            removed += 1
+        except OSError as exc:  # noqa: PERF203 -- a stale thumb must not fail a merge
+            log.warning("could not delete face thumb %s: %s", path, exc)
+    return removed
+
+
 def get_or_create_face_thumb(
     cluster_id: uuid.UUID, photo_id: uuid.UUID, source_path: Path, bbox: dict
 ) -> Path:

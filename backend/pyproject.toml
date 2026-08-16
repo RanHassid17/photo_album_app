@@ -24,6 +24,9 @@ dependencies = [
   "opencv-python-headless>=4.10",
   "numpy>=1.26",
   "hdbscan>=0.8.38",
+  # Agglomerative merge of look-alike face clusters. Already pulled in by hdbscan,
+  # but the merge pass imports it directly, so it is declared directly.
+  "scipy>=1.13",
   "httpx>=0.27",
   "certifi>=2024.7",
 ]
