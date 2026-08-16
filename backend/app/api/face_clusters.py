@@ -6,12 +6,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import Integer, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import FaceCluster, FaceEmbedding, Photo
-from app.services.face_thumbs import get_or_create_face_thumb
+from app.services.face_thumbs import face_display_rank, get_or_create_face_thumb
 
 router = APIRouter(prefix="/api/face-clusters", tags=["face_clusters"])
 
@@ -57,41 +57,55 @@ def rename_cluster(
     return cluster
 
 
-# How many candidate faces to weigh when choosing the one to show.
+# How many candidate faces to weigh when choosing the one to show. Ordering by size
+# first means the sample is the cluster's most promising faces, not an arbitrary slice.
 _REPRESENTATIVE_SAMPLE = 60
 
 
-def _face_area(face: FaceEmbedding) -> int:
-    bbox = face.bbox or {}
-    return int(bbox.get("w", 0) or 0) * int(bbox.get("h", 0) or 0)
-
-
 def _representative_face(db: Session, cluster: FaceCluster) -> tuple[Photo, dict]:
-    """Pick the best face to show for a cluster.
+    """Pick the clearest, most front-on face to show for a cluster.
 
-    Previously this took whichever row came back first, which is why people showed up
-    in profile or half-turned. A detector's box is largest when the subject is closest
-    to the camera and facing it, so the biggest box is a good cheap proxy for "a clear,
-    front-on face" without running a second model.
+    Box size alone was the previous proxy for this, and it is a bad one: the biggest
+    box in a cluster is often a blurred face close to the lens, a head turned to the
+    side, or someone half out of frame. Sharpness and eye separation are measured per
+    face at index time (see app.workers.models._face_quality), so the choice can be
+    made on what the face actually looks like.
     """
     faces = list(
         db.scalars(
             select(FaceEmbedding)
             .where(FaceEmbedding.cluster_id == cluster.id)
+            .order_by(
+                (
+                    FaceEmbedding.bbox["w"].astext.cast(Integer)
+                    * FaceEmbedding.bbox["h"].astext.cast(Integer)
+                ).desc()
+            )
             .limit(_REPRESENTATIVE_SAMPLE)
         ).all()
     )
     if not faces:
         raise HTTPException(status_code=404, detail="cluster has no faces")
 
-    face = max(
-        faces,
-        key=lambda f: (
-            _face_area(f),
-            f.photo_id == cluster.representative_photo_id,
-        ),
-    )
-    photo = db.get(Photo, face.photo_id)
+    photos = {
+        p.id: p
+        for p in db.scalars(
+            select(Photo).where(Photo.id.in_({f.photo_id for f in faces}))
+        ).all()
+    }
+
+    def rank(face: FaceEmbedding) -> tuple[int, float]:
+        photo = photos.get(face.photo_id)
+        return face_display_rank(
+            face.bbox or {},
+            face.sharpness,
+            face.frontality,
+            photo.width if photo else None,
+            photo.height if photo else None,
+        )
+
+    face = max(faces, key=rank)
+    photo = photos.get(face.photo_id)
     if photo is None:
         raise HTTPException(status_code=404, detail="photo not found")
     return photo, face.bbox

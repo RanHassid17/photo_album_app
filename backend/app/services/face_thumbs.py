@@ -70,6 +70,70 @@ def _padded_box(bbox: dict, img_w: int, img_h: int) -> tuple[int, int, int, int]
     return left, top, right, bottom
 
 
+# What counts as a face worth showing. Calibrated on this library: the Laplacian
+# variance of an in-focus face runs into the hundreds while an out-of-focus one sits
+# under ~20, and eye separation is 0.40+ of face width head-on but under 0.33 in
+# profile. See app.workers.models._face_quality for how the two are measured.
+_CLEAN_SHARPNESS = 80.0
+_CLEAN_FRONTALITY = 0.40
+_OK_SHARPNESS = 40.0
+_OK_FRONTALITY = 0.35
+# A face this wide in the original file fills the 160px thumbnail without upscaling.
+_AMPLE_WIDTH = 240.0
+
+
+def _crop_fits(bbox: dict, photo_w: int | None, photo_h: int | None) -> bool:
+    """True if the padded crop stays inside the frame — i.e. the face is not cut off.
+
+    A face at the edge of a photo gets its crop clamped to the frame, which is exactly
+    the half-a-head thumbnail we are trying to avoid showing.
+    """
+    if not photo_w or not photo_h:
+        return True  # dimensions unknown; do not reject on a guess
+    x, y = int(bbox.get("x", 0) or 0), int(bbox.get("y", 0) or 0)
+    w, h = int(bbox.get("w", 0) or 0), int(bbox.get("h", 0) or 0)
+    pad_x, pad_y = w * _FACE_PAD_RATIO, h * _FACE_PAD_RATIO
+    return (
+        x - pad_x >= 0
+        and y - pad_y >= 0
+        and x + w + pad_x <= photo_w
+        and y + h + pad_y <= photo_h
+    )
+
+
+def face_display_rank(
+    bbox: dict,
+    sharpness: float | None,
+    frontality: float | None,
+    photo_w: int | None = None,
+    photo_h: int | None = None,
+) -> tuple[int, float]:
+    """Rank one face as a portrait: (tier, score), higher is better.
+
+    Tier 2 is a clear, front-on, uncropped face; tier 1 is passable; tier 0 is whatever
+    is left. Ranking in tiers rather than one blended number means a soft or side-on
+    face can never outscore a clean one by being bigger — but a person photographed
+    only in profile still gets a thumbnail instead of nothing.
+    """
+    width = float(bbox.get("w", 0) or 0)
+    fits = _crop_fits(bbox, photo_w, photo_h)
+
+    tier = 0
+    if fits and sharpness is not None and frontality is not None:
+        if sharpness >= _CLEAN_SHARPNESS and frontality >= _CLEAN_FRONTALITY:
+            tier = 2
+        elif sharpness >= _OK_SHARPNESS and frontality >= _OK_FRONTALITY:
+            tier = 1
+
+    score = (
+        2.0 * min((sharpness or 0.0) / 300.0, 1.0)
+        + 1.5 * min((frontality or 0.0) / 0.45, 1.0)
+        + 1.0 * min(width / _AMPLE_WIDTH, 1.0)
+        + (0.5 if fits else 0.0)
+    )
+    return tier, score
+
+
 def delete_face_thumbs(cluster_id: uuid.UUID) -> int:
     """Drop every cached crop for a cluster. Returns how many files were removed.
 

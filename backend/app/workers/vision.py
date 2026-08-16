@@ -133,6 +133,8 @@ def _index_from_analysis(  # noqa: PLR0913
                     bbox=face["bbox"],
                     embedding=face["embedding_bytes"],
                     embedding_dim=face["dim"],
+                    sharpness=face.get("sharpness"),
+                    frontality=face.get("frontality"),
                 )
             )
             outcome.face_count += 1

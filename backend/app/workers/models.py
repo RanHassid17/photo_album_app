@@ -96,12 +96,52 @@ def _get_yolo():
     return _yolo_model
 
 
+# A face this small on the analysis copy (longest edge 2000px) is a background
+# bystander: too few pixels for Facenet512 to embed meaningfully, so it clusters on
+# noise and invents people who do not exist. Measured on this library, the junk
+# clusters were built entirely from detections under ~35px.
+_MIN_FACE_PX = 32
+
+
+def _face_quality(gray: "np.ndarray", region: dict) -> tuple[float | None, float | None]:
+    """Return (sharpness, frontality) for one detected face.
+
+    sharpness  variance of the Laplacian over the face crop, resized to a fixed
+               112x112 so the number means the same thing for a big face and a small
+               one. Crisp faces score in the hundreds, out-of-focus ones under ~20.
+    frontality distance between the eyes as a fraction of face width. A head turned to
+               the side foreshortens that gap: measured on this library, profiles land
+               under 0.33 and faces looking at the camera at 0.40+.
+
+    Either can be None when the detector gave us nothing to measure -- an unknown score
+    must not be confused with a bad one.
+    """
+    import cv2
+
+    x, y, w, h = (int(region.get(k, 0) or 0) for k in ("x", "y", "w", "h"))
+    crop = gray[max(0, y) : y + h, max(0, x) : x + w]
+    sharpness = None
+    if crop.size:
+        resized = cv2.resize(crop, (112, 112), interpolation=cv2.INTER_AREA)
+        sharpness = float(cv2.Laplacian(resized, cv2.CV_64F).var())
+
+    left, right = region.get("left_eye"), region.get("right_eye")
+    frontality = None
+    if left and right and w > 0:
+        frontality = float(np.hypot(left[0] - right[0], left[1] - right[1])) / w
+
+    return sharpness, frontality
+
+
 def face_embeddings(path: Path, scale: float = 1.0) -> Iterator[dict[str, Any]]:
-    """Yield {'bbox': {...}, 'embedding_bytes': bytes, 'dim': int} per detected face.
+    """Yield one dict per detected face: bbox, embedding, and quality scores.
 
     `scale` maps detector coordinates back to the original frame when detection ran on
-    a downscaled copy, so stored boxes stay valid against the full-resolution file.
+    a downscaled copy, so stored boxes stay valid against the full-resolution file. The
+    quality scores are deliberately measured before that rescale, on the pixels the
+    detector actually saw.
     """
+    import cv2
     from deepface import DeepFace
 
     model_name, detector, _ = _vision_settings()
@@ -116,6 +156,7 @@ def face_embeddings(path: Path, scale: float = 1.0) -> Iterator[dict[str, Any]]:
                 enforce_detection=False,
                 align=True,
             )
+            gray = cv2.imread(str(readable), cv2.IMREAD_GRAYSCALE)
     except Exception as exc:  # noqa: BLE001
         log.warning("DeepFace.represent failed for %s: %s", path, exc)
         return
@@ -131,6 +172,13 @@ def face_embeddings(path: Path, scale: float = 1.0) -> Iterator[dict[str, Any]]:
         h = region.get("h", 0) or 0
         if w <= 0 or h <= 0:
             continue
+        # Detector confidence is no help here: MTCNN reports 0.98-1.0 even for the
+        # flat patches of background it hallucinates faces in. Size is the honest signal.
+        if min(w, h) < _MIN_FACE_PX:
+            continue
+        sharpness, frontality = (
+            _face_quality(gray, region) if gray is not None else (None, None)
+        )
         vec = np.asarray(embedding, dtype=np.float32)
         yield {
             "bbox": {
@@ -141,6 +189,8 @@ def face_embeddings(path: Path, scale: float = 1.0) -> Iterator[dict[str, Any]]:
             },
             "embedding_bytes": vec.tobytes(),
             "dim": int(vec.size),
+            "sharpness": sharpness,
+            "frontality": frontality,
         }
 
 

@@ -4,7 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, LargeBinary, String, func
+from sqlalchemy import (
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    LargeBinary,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,6 +55,11 @@ class FaceEmbedding(Base):
     bbox: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     embedding: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     embedding_dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    # How presentable this particular face is, so the people filter can show a clear
+    # portrait instead of whichever crop happened to come back first. Nullable because
+    # rows written before the scores existed have no measurement -- unknown, not bad.
+    sharpness: Mapped[float | None] = mapped_column(Float, nullable=True)
+    frontality: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

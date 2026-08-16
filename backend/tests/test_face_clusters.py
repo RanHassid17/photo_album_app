@@ -104,3 +104,123 @@ def test_thumb_returns_a_cropped_face(tmp_path: Path) -> None:
 def test_thumb_for_unknown_cluster_is_404() -> None:
     r = client.get(f"/api/face-clusters/{uuid.uuid4()}/thumb")
     assert r.status_code == 404
+
+
+def _seed_cluster_with_faces(tmp_path: Path, faces: list[dict]) -> uuid.UUID:
+    """One cluster whose faces differ only in the qualities the ranking cares about."""
+    img_path = tmp_path / f"multi_{uuid.uuid4().hex[:6]}.jpg"
+    Image.new("RGB", (400, 300), (180, 140, 120)).save(img_path, "JPEG")
+
+    db = SessionLocal()
+    try:
+        photo = Photo(
+            source="local_folder",
+            source_ref=img_path.name,
+            sha256=uuid.uuid4().hex + uuid.uuid4().hex,
+            original_path=str(img_path),
+            stored_path=str(img_path),
+            width=400,
+            height=300,
+        )
+        db.add(photo)
+        db.flush()
+        cluster = FaceCluster(representative_photo_id=photo.id, face_count=len(faces))
+        db.add(cluster)
+        db.flush()
+        for spec in faces:
+            db.add(
+                FaceEmbedding(
+                    photo_id=photo.id,
+                    cluster_id=cluster.id,
+                    bbox=spec["bbox"],
+                    embedding=np.zeros(8, dtype=np.float32).tobytes(),
+                    embedding_dim=8,
+                    sharpness=spec.get("sharpness"),
+                    frontality=spec.get("frontality"),
+                )
+            )
+        db.commit()
+        return cluster.id
+    finally:
+        db.close()
+
+
+def test_representative_prefers_a_clear_frontal_face_over_a_bigger_one(
+    tmp_path: Path,
+) -> None:
+    """The whole point: a large blurry profile must lose to a smaller clear portrait."""
+    from app.api.face_clusters import _representative_face
+
+    clear = {"x": 100, "y": 60, "w": 70, "h": 70, "sharpness": 260.0, "frontality": 0.44}
+    big_blurry_profile = {
+        "x": 40, "y": 40, "w": 180, "h": 180, "sharpness": 9.0, "frontality": 0.22,
+    }
+    cluster_id = _seed_cluster_with_faces(
+        tmp_path,
+        [
+            {"bbox": {k: big_blurry_profile[k] for k in "xywh"},
+             "sharpness": big_blurry_profile["sharpness"],
+             "frontality": big_blurry_profile["frontality"]},
+            {"bbox": {k: clear[k] for k in "xywh"},
+             "sharpness": clear["sharpness"], "frontality": clear["frontality"]},
+        ],
+    )
+
+    db = SessionLocal()
+    try:
+        cluster = db.get(FaceCluster, cluster_id)
+        _, bbox = _representative_face(db, cluster)
+    finally:
+        db.close()
+
+    assert bbox["w"] == 70, "picked the big blurry profile instead of the clear face"
+
+
+def test_representative_avoids_a_face_cut_off_by_the_frame(tmp_path: Path) -> None:
+    """A face at the edge crops to half a head, so an equally good centred face wins."""
+    from app.api.face_clusters import _representative_face
+
+    cluster_id = _seed_cluster_with_faces(
+        tmp_path,
+        [
+            # Flush against the left edge: the padded crop cannot fit.
+            {"bbox": {"x": 0, "y": 100, "w": 90, "h": 90},
+             "sharpness": 300.0, "frontality": 0.45},
+            {"bbox": {"x": 150, "y": 100, "w": 85, "h": 85},
+             "sharpness": 300.0, "frontality": 0.45},
+        ],
+    )
+
+    db = SessionLocal()
+    try:
+        cluster = db.get(FaceCluster, cluster_id)
+        _, bbox = _representative_face(db, cluster)
+    finally:
+        db.close()
+
+    assert bbox["x"] == 150
+
+
+def test_representative_still_returns_a_face_when_none_are_measured(
+    tmp_path: Path,
+) -> None:
+    """Faces indexed before quality scoring existed have no scores — show them anyway."""
+    from app.api.face_clusters import _representative_face
+
+    cluster_id = _seed_cluster_with_faces(
+        tmp_path,
+        [
+            {"bbox": {"x": 100, "y": 60, "w": 40, "h": 40}},
+            {"bbox": {"x": 150, "y": 60, "w": 95, "h": 95}},
+        ],
+    )
+
+    db = SessionLocal()
+    try:
+        cluster = db.get(FaceCluster, cluster_id)
+        _, bbox = _representative_face(db, cluster)
+    finally:
+        db.close()
+
+    # No scores to go on, so size is the only remaining signal.
+    assert bbox["w"] == 95
